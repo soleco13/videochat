@@ -1,33 +1,102 @@
 {% extends 'base/main.html' %}
 {% load static %}
+
+{% block extra_head %}
+<!-- Styles - Load in correct order: theme (variables) -> room -> chat -->
+{% if USE_BUILT_STATIC or not debug %}
+<link rel="stylesheet" type="text/css" href="{% static 'styles/theme.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<link rel="stylesheet" type="text/css" href="{% static 'styles/room.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<link rel="stylesheet" type="text/css" href="{% static 'styles/chat.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<!-- Import map for module resolution (must be before module scripts) -->
+<script type="importmap">
+{
+  "imports": {
+    "./runtime-dom.esm-bundler-BYL20jEJ.js": "{% static 'js/runtime-dom.esm-bundler-BYL20jEJ.js' %}"
+  }
+}
+</script>
+{% else %}
+<link rel="stylesheet" href="http://localhost:5173/styles/theme.css">
+<link rel="stylesheet" href="http://localhost:5173/styles/room.css">
+<link rel="stylesheet" href="http://localhost:5173/styles/chat.css">
+{% endif %}
+{% endblock %}
+
 {% block content %}
 
-<main>
-    <section id="room-name-wrapper">
-        <p>Room Name: <span id="room-name"></span></p>
-    </section>
-
-    <section id="video-streams"></section>
-    {{ room_name|json_script:"room-name" }}
-    <section id="controls-wrapper">
-        <div class="icon-wrapper">
-            <img class="control-icon" id="mic-btn" src="{% static 'images/microphone.svg' %}" />
+{% verbatim %}
+<div id="app">
+    <div class="room-container">
+        <!-- Header -->
+        <div class="room-header">
+            <div style="flex: 1;">
+                <h2>Room: <span id="room-name-display"></span></h2>
+                <div class="invite-link-container" id="invite-link-container" style="display: none;">
+                    <input type="text" id="invite-link-input" readonly class="invite-link-input"/>
+                    <button id="copy-invite-btn" class="copy-invite-btn">Copy Link</button>
+                </div>
+            </div>
         </div>
 
-        <div class="icon-wrapper">
-            <img class="control-icon" id="camera-btn" src="{% static 'images/video.svg' %}" />
-        </div>
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Video Section -->
+            <div class="video-section" id="video-section">
+                <div class="video-streams" id="video-streams">
+                    <!-- Videos will be dynamically added here -->
+                </div>
+                
+                <!-- Controls -->
+                <div class="controls-wrapper">
+                    <button id="chat-toggle-btn" class="control-btn chat-toggle-btn">
+                        <img src="{% endverbatim %}{% static 'images/message.svg' %}{% verbatim %}" alt="Chat" />
+                        <span class="chat-badge" id="chat-badge" style="display: none;">0</span>
+                    </button>
+                    <button id="toggle-mic-btn" class="control-btn">
+                        <img src="{% endverbatim %}{% static 'images/microphone.svg' %}{% verbatim %}" alt="Mic" />
+                    </button>
+                    <button id="toggle-camera-btn" class="control-btn">
+                        <img src="{% endverbatim %}{% static 'images/video.svg' %}{% verbatim %}" alt="Camera" />
+                    </button>
+                    <button id="leave-room-btn" class="control-btn leave-btn">
+                        <img src="{% endverbatim %}{% static 'images/leave1.svg' %}{% verbatim %}" alt="Leave" />
+                    </button>
+                </div>
+            </div>
 
-        <div class="icon-wrapper">
-            <img class="control-icon" id="leave-btn" src="{% static 'images/leave1.svg' %}" />
+            <!-- Chat Section -->
+            <div class="chat-section" id="chat-section" style="display: none;">
+                <div class="chat-messages" id="chat-messages">
+                    <!-- Messages will be added here dynamically -->
+                </div>
+                <div class="chat-input-wrapper">
+                    <input 
+                        id="chat-input"
+                        type="text" 
+                        placeholder="Type your message..." 
+                        class="chat-input"
+                    />
+                    <button id="send-message-btn" class="send-btn">Send</button>
+                </div>
+            </div>
         </div>
-        <div class="icon-wrapper">
-            <a href="/chat/{{room_name}}" target="_blank"><img class="control-icon"  src="{% static 'images/message.svg' %}" /></a>
-        </div>
-    </section>
-</main>
+    </div>
+</div>
+{% endverbatim %}
 
+{{ room_name|json_script:"room-name" }}
+{% if invite_url %}{{ invite_url|json_script:"invite-url" }}{% endif %}
+{% if room_id %}{{ room_id|json_script:"room-id" }}{% endif %}
 
-<script type="text/javascript" src="{% static 'assets/AgoraRTC_N-4.8.0.js' %}"></script>
-<script type="text/javascript" src="{% static 'js/streams.js' %}" ></script>
 {% endblock content %}
+
+{% block extra_scripts %}
+<!-- Vue.js -->
+{% if USE_BUILT_STATIC or not debug %}
+<!-- Production: Use built files -->
+<script type="module" src="{% static 'js/vue-app.js' %}?v={{ STATIC_VERSION|default:'1' }}"></script>
+{% else %}
+<!-- Development: Use Vite dev server -->
+<script type="module" src="http://localhost:5173/room-entry.js"></script>
+{% endif %}
+{% endblock %}

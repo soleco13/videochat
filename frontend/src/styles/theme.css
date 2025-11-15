@@ -1,0 +1,90 @@
+/* 🎨 Color Palette */
+:root {
+  /* Background Colors */
+  --bg-primary: #2F3E46;        /* Основной фон (самый тёмный) */
+  --bg-secondary: #354F52;      /* Вспомогательный фон (секции, карточки) */
+  
+  /* Accent Colors */
+  --accent-active: #52796F;     /* Тёмно-зелёный для активных элементов */
+  --accent-inactive: #84A98C;   /* Светло-зелёный для неактивных элементов */
+  --accent-highlight: #CAD2C5;  /* Подсветка видео при активном микрофоне */
+  
+  /* Text Colors */
+  --text-primary: #FFFFFF;      /* Основной текст */
+  --text-secondary: rgba(255, 255, 255, 0.8);   /* Вторичный текст */
+  --text-muted: rgba(255, 255, 255, 0.6);       /* Приглушённый текст */
+  
+  /* Interactive States */
+  --hover-bg: rgba(82, 121, 111, 0.2);          /* Hover фон */
+  --active-bg: rgba(82, 121, 111, 0.3);        /* Active фон */
+  --border-color: rgba(132, 169, 140, 0.3);     /* Цвет границ */
+  --border-active: #52796F;                     /* Активная граница */
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px rgba(202, 210, 197, 0.4); /* Свечение для активного микрофона */
+  
+}
+
+/* Global Reset & Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Фиксированный масштаб для предотвращения изменения размера */
+  zoom: 1;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Предотвращение масштабирования на мобильных */
+  touch-action: pan-x pan-y;
+  overflow-x: hidden;
+}
+
+html {
+  /* Фиксированный масштаб */
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-active);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-inactive);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-active);
+  color: var(--text-primary);
+}
+

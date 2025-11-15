@@ -6,7 +6,8 @@ import mimetypes
 from django.http import HttpResponse
 import os
 import pyqrcode
-from PIL import Image, ImageTk
+from PIL import Image
+# ImageTk не используется и требует tkinter, который не нужен на сервере
 
 # Create your views here.
 

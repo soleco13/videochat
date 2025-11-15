@@ -1,5 +1,17 @@
 {% extends 'base/main.html' %}
 {% load static %}
+
+{% block extra_head %}
+<!-- Styles for Lobby -->
+{% if USE_BUILT_STATIC or not debug %}
+<link rel="stylesheet" href="{% static 'styles/theme.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<link rel="stylesheet" href="{% static 'styles/lobby.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+{% else %}
+<link rel="stylesheet" href="http://localhost:5173/styles/theme.css">
+<link rel="stylesheet" href="http://localhost:5173/styles/lobby.css">
+{% endif %}
+{% endblock %}
+
 {% block content %}
 
 <main>
@@ -18,19 +30,28 @@
 
                 <div class="form-field">
                     <label>Room:</label>
-                    <input name="room" placeholder="Enter a room name..."  style="text-transform:uppercase"/>
+                    <input name="room" placeholder="Enter a room name..."  style="text-transform:uppercase" required/>
                 </div>
 
                 <div class="form-field">
                     <label>Name:</label>
-                    <input name="name" placeholder="Enter your name..."  style="text-transform:uppercase"/>
+                    <input name="name" placeholder="Enter your name..."  style="text-transform:uppercase" required/>
                 </div>
 
                 <div class="form-field">
-                    <input type="submit" value="Join Stream" />
+                    <input type="submit" value="Create/Join Room" />
                 </div>
             </div>
         </form>
+        
+        <div id="invite-section" style="display: none; margin-top: 20px; padding: 15px; background-color: #f0f0f0; border-radius: 5px;">
+            <h3 style="margin-top: 0; font-size: 16px;">Invite Link:</h3>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <input type="text" id="invite-link" readonly style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: white;"/>
+                <button onclick="copyInviteLink()" style="padding: 8px 15px; background-color: rgb(75, 93, 172); color: white; border: none; border-radius: 4px; cursor: pointer;">Copy</button>
+            </div>
+            <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">Share this link with others to invite them to the room</p>
+        </div>
     </section>
 </main>
 
@@ -39,24 +60,79 @@
 
     let handleSubmit = async (e) => {
         e.preventDefault()
-        let room = e.target.room.value.toUpperCase()
-        let name = e.target.name.value
+        let room = e.target.room.value.trim().toUpperCase()
+        let name = e.target.name.value.trim().toUpperCase()
 
-        let response = await fetch(`/get_token/?channel=${room}`)
-        let data = await response.json()
+        if (!room || !name) {
+            alert('Please fill in all fields')
+            return
+        }
 
-        let UID = data.uid
-        let token = data.token
+        try {
+            // Create room and get invite link
+            let createResponse = await fetch('/create_room/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    room_name: room,
+                    name: name
+                })
+            })
+            
+            let roomData = await createResponse.json()
+            
+            if (roomData.error) {
+                alert(roomData.error)
+                return
+            }
 
-        sessionStorage.setItem('UID', UID)
-        sessionStorage.setItem('token', token)
-        sessionStorage.setItem('room', room)
-        sessionStorage.setItem('name', name)
-        localStorage.setItem("username", name);
-        window.open(`/room/${room}`, '_self')
+            // Show invite link
+            const inviteSection = document.getElementById('invite-section')
+            const inviteLink = document.getElementById('invite-link')
+            inviteLink.value = roomData.invite_url
+            inviteSection.style.display = 'block'
+
+            // WebRTC doesn't need tokens, just get UID
+            let response = await fetch(`/get_token/?channel=${room}`)
+            let data = await response.json()
+
+            let UID = data.uid || Math.random().toString(36).substring(7)
+            let token = null
+
+            sessionStorage.setItem('UID', UID)
+            sessionStorage.setItem('token', token || '')
+            sessionStorage.setItem('room', room)
+            sessionStorage.setItem('name', name)
+            localStorage.setItem("username", name);
+            
+            // Redirect after a short delay to show invite link
+            setTimeout(() => {
+                window.open(`/room/${room}`, '_self')
+            }, 1000)
+        } catch (error) {
+            console.error('Error creating room:', error)
+            alert('Error creating room. Please try again.')
+        }
     }
 
-
+    function copyInviteLink() {
+        const inviteLink = document.getElementById('invite-link')
+        inviteLink.select()
+        inviteLink.setSelectionRange(0, 99999) // For mobile devices
+        document.execCommand('copy')
+        
+        const button = event.target
+        const originalText = button.textContent
+        button.textContent = 'Copied!'
+        button.style.backgroundColor = '#4CAF50'
+        
+        setTimeout(() => {
+            button.textContent = originalText
+            button.style.backgroundColor = 'rgb(75, 93, 172)'
+        }, 2000)
+    }
 
     form.addEventListener('submit', handleSubmit)
 </script>

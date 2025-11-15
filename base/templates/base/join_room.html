@@ -1,0 +1,87 @@
+{% extends 'base/main.html' %}
+{% load static %}
+
+{% block extra_head %}
+<!-- Styles for Join Room -->
+{% if USE_BUILT_STATIC or not debug %}
+<link rel="stylesheet" href="{% static 'styles/theme.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<link rel="stylesheet" href="{% static 'styles/lobby.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+{% else %}
+<link rel="stylesheet" href="http://localhost:5173/styles/theme.css">
+<link rel="stylesheet" href="http://localhost:5173/styles/lobby.css">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+<main>
+    <section id="form-container">
+        <img id="logo" src="{% static 'images/group.svg' %}"/>
+
+        <div id="welcome-message">
+            <h1>Join Room</h1>
+            {% if error %}
+                <p style="color: red;">{{ error }}</p>
+            {% else %}
+                <p>Enter your name to join the room</p>
+            {% endif %}
+        </div>
+
+        {% if not error %}
+        <form id="form">
+            <div class="field-wrapper">
+                <div class="form-field">
+                    <label>Room:</label>
+                    <input name="room" value="{{ room_name }}" readonly style="background-color: #f0f0f0;"/>
+                </div>
+
+                <div class="form-field">
+                    <label>Name:</label>
+                    <input name="name" placeholder="Enter your name..." style="text-transform:uppercase" required/>
+                </div>
+
+                <div class="form-field">
+                    <input type="submit" value="Join Room" />
+                </div>
+            </div>
+        </form>
+        {% endif %}
+    </section>
+</main>
+
+{% if not error %}
+<script>
+    let form = document.getElementById('form')
+    const roomName = '{{ room_name }}';
+    const roomId = '{{ room_id }}';
+
+    let handleSubmit = async (e) => {
+        e.preventDefault()
+        let name = e.target.name.value.trim().toUpperCase()
+
+        if (!name) {
+            alert('Please enter your name')
+            return
+        }
+
+        // WebRTC doesn't need tokens, just get UID
+        let response = await fetch(`/get_token/?channel=${roomName}`)
+        let data = await response.json()
+
+        let UID = data.uid || Math.random().toString(36).substring(7)
+        let token = null
+
+        sessionStorage.setItem('UID', UID)
+        sessionStorage.setItem('token', token || '')
+        sessionStorage.setItem('room', roomName)
+        sessionStorage.setItem('name', name)
+        localStorage.setItem("username", name);
+        window.open(`/room/${roomName}`, '_self')
+    }
+
+    form.addEventListener('submit', handleSubmit)
+</script>
+{% endif %}
+
+{% endblock content %}
+

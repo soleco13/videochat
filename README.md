@@ -1,90 +1,216 @@
-# 🔥 Batch Meet
-Batch Meet is an online Community Chat Application mainly used for meeting and remote file access.
+# Video Chat App - Django + Vue.js
 
-# 💎 Features
-- User can create Chat Rooms.
-- User can Communicate on a Group call.
-- Group Call User Controls.
-- Server can handle more than 50 users/ call.
-- Live Video and Audio Interaction.
-- Unique room name for chat room.
+Веб-приложение для видеоконференций с чатом в реальном времени, построенное на Django (бэкенд) и Vue.js 3 с Vite (фронтенд).
 
-# ⚙️ Prerequisites
+## Технологии
 
-- You need to have python installed. You can install it from microsoft store or follow this [guide](https://www.geeksforgeeks.org/how-to-install-python-on-windows/).
-- Django
-- Redis
-- Agora.io Account
+- **Backend**: Django 5.x, Django Channels, WebSockets, Redis
+- **Frontend**: Vue.js 3, Vite, WebRTC
+- **База данных**: SQLite (по умолчанию)
+- **Сервер приложений**: Daphne (ASGI)
 
-# Setting up a Virtual Enviroment
+## Быстрый старт
 
-It’s a common practice to have your Python apps and their instances running in virtual environments. Virtual environments allow different package sets and configurations to run simultaneously, and avoid conflicts due to incompatible package versions. 
-
-Create a Virtual Enviroment in python by executing following command.
-```bash
-$ python3 -m venv env
-```
-activate the virtual environment.
-```bash
-# On Unix or MacOS (bash shell): 
-/path/to/venv/bin/activate
-
-# On Unix or MacOS (csh shell):
-/path/to/venv/bin/activate.csh
-
-# On Unix or MacOS (fish shell):
-/path/to/venv/bin/activate.fish
-
-# On Windows (command prompt):
-\path\to\venv\Scripts\activate.bat
-
-# On Windows (PowerShell):
-\path\to\venv\Scripts\Activate.ps1
-```
-
-
-# Installation:
-now install all the dependiencies
-```bash
- $ pip install requirements.txt
-```
-Django is a high-level Python web framework that encourages rapid development and clean, pragmatic design. Built by experienced developers, it takes care of much of the hassle of web development, so you can focus on writing your app without needing to reinvent the wheel. It’s free and open source. 
-
-## Agora IO Setup:
-create an Agora account by signing on agora.io 
-
-create an App, copy the App id and App certificate from there and Paste it in the following files:
-
-/base/views.py
-/base/static/js/stream.js
-
-After placing App id and App certificate you're ready to go.
-# App Demo
-### Login Screen:
-<img src="https://github.com/rimmelasghar/Video-chat-app-Django/blob/master/App%20Images/img1.PNG">
-### Meeting Room Screen
-<img src="https://github.com/rimmelasghar/Video-chat-app-Django/blob/master/App%20Images/img2.PNG">
-
-# Working:
-Thats it! You are ready to go. </br>
-This project uses Redis channel as a channel Layer.
-```bash
-$ docker run -p 6379:6379 -d redis:5
-```
-
-run the Project by executing this.
+### 1. Установка зависимостей
 
 ```bash
-$ python manage.py runserver
+# Python зависимости
+cd /root/Video-chat-app-Django
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Node.js зависимости для фронтенда
+cd frontend
+npm install
 ```
 
-Project will be available on
-``http://127.0.0.1:8000``
+### 2. Настройка Redis
 
-# Troubleshooting
-If you are facing any problems, feel free to open an issue or contact me on `rimmelasghar4@gmail.com` 
+```bash
+# Установка и запуск Redis
+sudo apt update
+sudo apt install redis-server
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
 
+# Проверка
+redis-cli ping
+```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
-<br>
-Code by Rimmel with ❤
+### 3. Настройка Django
+
+```bash
+# Применение миграций
+python manage.py migrate
+
+# Сбор статических файлов
+python manage.py collectstatic --noinput
+```
+
+### 4. Разработка
+
+#### Запуск сервера разработки Django
+```bash
+python manage.py runserver
+```
+
+#### Запуск Vite dev server (в отдельном терминале)
+```bash
+cd frontend
+npm run dev
+```
+
+Приложение будет доступно на `http://localhost:8000`
+
+### 5. Сборка для продакшена
+
+```bash
+# Сборка фронтенда
+cd frontend
+npm run build
+
+# Сборка статических файлов Django
+cd ..
+python manage.py collectstatic --noinput
+```
+
+### 6. Запуск в продакшене
+
+#### Автоматический запуск через systemd (рекомендуется)
+
+Сервисы настроены на автоматический запуск при загрузке системы и автоматический перезапуск при падении.
+
+```bash
+# Проверка статуса
+systemctl status video-chat-app
+systemctl status redis-server
+
+# Ручной запуск/остановка
+systemctl start video-chat-app
+systemctl stop video-chat-app
+systemctl restart video-chat-app
+
+# Просмотр логов
+journalctl -u video-chat-app -f
+journalctl -u video-chat-app -n 50
+
+# Перезапуск всех сервисов
+/root/Video-chat-app-Django/restart-services.sh
+```
+
+#### Ручной запуск (для тестирования)
+
+```bash
+# Запуск с Daphne
+daphne -b 127.0.0.1 -p 8000 mysite.asgi:application
+```
+
+## Структура проекта
+
+```
+Video-chat-app-Django/
+├── base/              # Основное Django приложение
+│   ├── consumers.py   # WebSocket consumers для WebRTC и чата
+│   ├── views.py       # Django views
+│   └── templates/     # Django шаблоны
+├── frontend/          # Vue.js фронтенд
+│   ├── src/
+│   │   ├── room-entry.js  # Точка входа для комнаты
+│   │   ├── styles/        # CSS стили
+│   │   └── ...
+│   └── vite.config.js     # Конфигурация Vite
+├── mysite/            # Настройки Django проекта
+├── staticfiles/       # Собранные статические файлы
+└── venv/              # Python виртуальное окружение
+```
+
+## Основные функции
+
+- ✅ Создание и присоединение к комнатам видеоконференций
+- ✅ Видео и аудио связь через WebRTC (P2P)
+- ✅ Чат в реальном времени через WebSockets
+- ✅ Адаптивный дизайн для всех устройств
+- ✅ Обнаружение активности микрофона
+- ✅ Управление камерой и микрофоном
+- ✅ Пригласительные ссылки для комнат
+
+## WebRTC
+
+Приложение использует WebRTC для прямого соединения между пользователями (P2P). Сигналинг происходит через WebSockets (Django Channels).
+
+### STUN серверы
+- `stun:stun.l.google.com:19302`
+- `stun:stun1.l.google.com:19302`
+
+## Разработка
+
+### Горячая перезагрузка
+
+При разработке фронтенда используйте Vite dev server (`npm run dev`), который автоматически перезагружает изменения.
+
+### Статические файлы
+
+В режиме разработки (`DEBUG=True`) статические файлы загружаются с Vite dev server.
+В продакшене используются собранные файлы из `staticfiles/`.
+
+## Производство
+
+### Переменные окружения
+
+Убедитесь, что в `mysite/settings.py` правильно настроены:
+- `DEBUG = False`
+- `ALLOWED_HOSTS`
+- `STATIC_ROOT`
+- `STATIC_URL`
+
+### Кэширование
+
+Статические файлы версионируются через `STATIC_VERSION` для предотвращения проблем с кэшированием.
+
+## Управление сервисами
+
+### Автозапуск
+
+Все сервисы настроены на автоматический запуск при загрузке системы:
+- ✅ Redis - автозапуск включен
+- ✅ Video Chat App (Daphne) - автозапуск включен
+- ✅ Автоматический перезапуск при падении (Restart=always)
+
+### Полезные команды
+
+```bash
+# Статус всех сервисов
+systemctl status video-chat-app redis-server
+
+# Перезапуск приложения
+systemctl restart video-chat-app
+
+# Просмотр логов в реальном времени
+journalctl -u video-chat-app -f
+
+# Последние 50 строк логов
+journalctl -u video-chat-app -n 50
+
+# Перезапуск всех сервисов
+/root/Video-chat-app-Django/restart-services.sh
+```
+
+## Устранение неполадок
+
+### WebSocket не подключается
+- Проверьте, что Redis запущен: `systemctl status redis-server` или `redis-cli ping`
+- Проверьте настройки Channels в `settings.py`
+- Проверьте логи: `journalctl -u video-chat-app -n 50`
+
+### Статические файлы не загружаются
+- Выполните `python manage.py collectstatic`
+- Проверьте `STATIC_ROOT` и `STATIC_URL` в `settings.py`
+- Очистите кэш браузера (Ctrl+Shift+R)
+
+### Видео не отображается
+- Проверьте разрешения браузера на доступ к камере/микрофону
+- Убедитесь, что используется HTTPS (для продакшена) или localhost
+
+## Лицензия
+
+MIT

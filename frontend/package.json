@@ -1,0 +1,20 @@
+{
+  "name": "video-chat-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && cp -f src/styles/*.css ../staticfiles/styles/ && node -e \"const fs=require('fs'); const version=Date.now().toString(); fs.writeFileSync('../.static_version', version); console.log('✅ Версия обновлена:', version);\"",
+    "build:prod": "vite build && node -e \"const fs=require('fs'); const version=Date.now().toString(); fs.writeFileSync('../.static_version', version); console.log('✅ Билд готов! Версия:', version);\"",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.24",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.2.2"
+  }
+}
+

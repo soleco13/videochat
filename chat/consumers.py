@@ -16,7 +16,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         # Leave room group
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        # Handle case when close_code is None or other errors
+        try:
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        except Exception as e:
+            # Log error but don't fail - connection is already closing
+            print(f"Error in ChatConsumer disconnect (non-critical): {e}")
 
     # Receive message from WebSocket
     async def receive(self, text_data):

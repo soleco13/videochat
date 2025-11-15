@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-o8sfycr9zmtd!u(zkajst*wo7iijq07fhjfpv4msk%ws2442$$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.ngrok.io']
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -33,8 +33,8 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.ngrok.io']
 INSTALLED_APPS = [
     'channels',
     'daphne',
+    'base',  # base должен быть первым, чтобы его статика собиралась первой
     'chat',
-    'base',
     'shareapp',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -68,6 +68,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'base.context_processors.static_version',
             ],
         },
     },
@@ -137,7 +138,32 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
+
+# Версия статических файлов для обхода кэша браузера
+# Обновляется автоматически при сборке
+import os
+STATIC_VERSION_FILE = os.path.join(BASE_DIR, '.static_version')
+if os.path.exists(STATIC_VERSION_FILE):
+    with open(STATIC_VERSION_FILE, 'r') as f:
+        STATIC_VERSION = f.read().strip()
+else:
+    STATIC_VERSION = '1'
+
+# Определяем, использовать ли собранные файлы (всегда в продакшене)
+# Можно переопределить через переменную окружения USE_BUILT_STATIC
+USE_BUILT_STATIC = os.environ.get('USE_BUILT_STATIC', 'False').lower() == 'true'
+# Если DEBUG=False, всегда используем собранные файлы
+if not DEBUG:
+    USE_BUILT_STATIC = True
+# Проверяем, существует ли собранный файл - если да, используем его
+VUE_APP_PATH = os.path.join(STATIC_ROOT, 'js', 'vue-app.js')
+if os.path.exists(VUE_APP_PATH):
+    USE_BUILT_STATIC = True
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
