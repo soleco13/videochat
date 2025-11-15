@@ -31,6 +31,11 @@ db.sqlite3-journal
 /static
 .static_version
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
 # Virtual Environment
 venv/
 env/
