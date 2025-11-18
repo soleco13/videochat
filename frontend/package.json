@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "fabric": "^6.9.0",
     "vue": "^3.5.24",
     "vue-router": "^4.4.0"
   },
@@ -17,4 +18,3 @@
     "vite": "^7.2.2"
   }
 }
-

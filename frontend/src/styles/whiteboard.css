@@ -1,0 +1,626 @@
+/* Whiteboard Section */
+.whiteboard-section {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-primary);
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Убеждаемся, что панель управления видна поверх доски */
+.whiteboard-section ~ * .controls-wrapper,
+body:has(.whiteboard-section[style*="flex"]) .controls-wrapper {
+    z-index: 2004 !important;
+}
+
+#whiteboard-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: white;
+    cursor: crosshair;
+}
+
+.whiteboard-toolbar {
+    position: fixed;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-secondary);
+    padding: 16px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    z-index: 2001;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 80vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-active) var(--bg-secondary);
+}
+
+/* Стили для скроллбара в whiteboard-toolbar */
+.whiteboard-toolbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.whiteboard-toolbar::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+.whiteboard-toolbar::-webkit-scrollbar-thumb {
+    background: var(--accent-active);
+    border-radius: 3px;
+}
+
+.whiteboard-toolbar::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-inactive);
+}
+
+.whiteboard-tools {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.whiteboard-tool-btn {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+}
+
+.whiteboard-tool-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+    transform: scale(1.1);
+}
+
+.whiteboard-tool-btn.active {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: white;
+}
+
+.whiteboard-tool-btn span {
+    display: block;
+    line-height: 1;
+}
+
+#whiteboard-color {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 2px;
+}
+
+#whiteboard-width {
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+    writing-mode: vertical-lr;
+    direction: rtl;
+}
+
+.whiteboard-toggle-btn {
+    position: relative;
+}
+
+.whiteboard-toggle-btn.active {
+    background: var(--accent-color);
+}
+
+.whiteboard-toggle-btn.active img,
+.whiteboard-toggle-btn.active span {
+    filter: brightness(0) invert(1);
+}
+
+/* Адаптивность для планшетов */
+@media screen and (max-width: 1024px) {
+    .whiteboard-toolbar {
+        left: 10px;
+        padding: 10px 8px;
+        max-height: 85vh;
+        gap: 8px;
+        border-radius: 10px;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-active) var(--bg-secondary);
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+        border-radius: 3px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb {
+        background: var(--accent-active);
+        border-radius: 3px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb:hover {
+        background: var(--accent-inactive);
+    }
+}
+
+/* Горизонтальный режим планшета - уменьшаем высоту toolbar и добавляем прокрутку */
+@media screen and (max-width: 1024px) and (orientation: landscape) {
+    .whiteboard-toolbar {
+        top: 100px !important;
+        transform: translateY(0) !important;
+        max-height: calc(100vh - 200px) !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        scrollbar-width: thin !important;
+        scrollbar-color: var(--accent-active) var(--bg-secondary) !important;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar {
+        width: 6px !important;
+        display: block !important;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-track {
+        background: var(--bg-secondary) !important;
+        border-radius: 3px !important;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb {
+        background: var(--accent-active) !important;
+        border-radius: 3px !important;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb:hover {
+        background: var(--accent-inactive) !important;
+    }
+    
+    .whiteboard-tools {
+        gap: 6px;
+    }
+    
+    .whiteboard-tool-btn {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        font-size: 16px;
+        padding: 7px;
+        border-radius: 6px;
+    }
+    
+    #whiteboard-color {
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+    }
+    
+    #whiteboard-width {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .room-header.whiteboard-mode {
+        min-height: 75px !important;
+        max-height: 90px !important;
+        padding: 5px 10px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-container {
+        width: 110px !important;
+        height: 62px !important;
+        min-width: 110px !important;
+        max-width: 110px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-streams {
+        gap: 7px !important;
+    }
+    
+    .main-content.whiteboard-open .controls-wrapper,
+    body > .controls-wrapper {
+        bottom: max(env(safe-area-inset-bottom, 0), 15px) !important;
+        padding: 12px 18px !important;
+        font-size: 13px;
+        gap: 14px !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        padding: 9px;
+        flex-shrink: 0 !important;
+    }
+}
+
+/* Адаптивность для мобильных устройств */
+@media screen and (max-width: 768px) {
+    .whiteboard-toolbar {
+        left: 8px;
+        padding: 10px 8px;
+        max-height: 80vh;
+        gap: 8px;
+        border-radius: 8px;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-active) var(--bg-secondary);
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar {
+        width: 5px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+        border-radius: 3px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb {
+        background: var(--accent-active);
+        border-radius: 3px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb:hover {
+        background: var(--accent-inactive);
+    }
+    
+    .whiteboard-tools {
+        gap: 6px;
+    }
+    
+    .whiteboard-tool-btn {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        font-size: 18px;
+        padding: 8px;
+        border-radius: 6px;
+    }
+    
+    #whiteboard-color {
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+    }
+    
+    #whiteboard-width {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .room-header.whiteboard-mode {
+        min-height: 65px !important;
+        max-height: 80px !important;
+        padding: 3px 6px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-container {
+        width: 90px !important;
+        height: 51px !important;
+        min-width: 90px !important;
+        max-width: 90px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-streams {
+        gap: 5px !important;
+    }
+    
+    .room-header.whiteboard-mode .username-wrapper {
+        font-size: 8px !important;
+        padding: 1px 3px !important;
+    }
+    
+    .main-content.whiteboard-open .controls-wrapper,
+    body > .controls-wrapper {
+        bottom: max(env(safe-area-inset-bottom, 0), 8px) !important;
+        padding: 12px 18px !important;
+        font-size: 12px;
+        gap: 16px !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: center !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn,
+    body > .controls-wrapper .control-btn {
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+        padding: 8px !important;
+        flex-shrink: 0 !important;
+        flex-grow: 0 !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn img,
+    body > .controls-wrapper .control-btn img {
+        width: 20px !important;
+        height: 20px !important;
+    }
+}
+
+/* Адаптивность для маленьких мобильных устройств */
+@media screen and (max-width: 480px) {
+    .whiteboard-toolbar {
+        left: 4px;
+        padding: 8px 6px;
+        max-height: 75vh;
+        gap: 6px;
+        border-radius: 6px;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-active) var(--bg-secondary);
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar {
+        width: 4px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+        border-radius: 2px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb {
+        background: var(--accent-active);
+        border-radius: 2px;
+    }
+    
+    .whiteboard-toolbar::-webkit-scrollbar-thumb:hover {
+        background: var(--accent-inactive);
+    }
+    
+    .whiteboard-tools {
+        gap: 5px;
+    }
+    
+    .whiteboard-tool-btn {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        font-size: 16px;
+        padding: 7px;
+        border-radius: 5px;
+    }
+    
+    #whiteboard-color {
+        width: 36px;
+        height: 36px;
+        border-radius: 5px;
+    }
+    
+    #whiteboard-width {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .room-header.whiteboard-mode {
+        min-height: 55px !important;
+        max-height: 70px !important;
+        padding: 2px 4px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-container {
+        width: 75px !important;
+        height: 42px !important;
+        min-width: 75px !important;
+        max-width: 75px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-streams {
+        gap: 3px !important;
+    }
+    
+    .room-header.whiteboard-mode .username-wrapper {
+        font-size: 7px !important;
+        padding: 1px 2px !important;
+        line-height: 1 !important;
+    }
+    
+    .main-content.whiteboard-open .controls-wrapper,
+    body > .controls-wrapper {
+        bottom: max(env(safe-area-inset-bottom, 0), 6px) !important;
+        padding: 10px 16px !important;
+        font-size: 11px;
+        width: calc(100% - 20px) !important;
+        max-width: 100% !important;
+        gap: 14px !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: center !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn,
+    body > .controls-wrapper .control-btn {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        max-width: 38px !important;
+        padding: 6px !important;
+        flex-shrink: 0 !important;
+        flex-grow: 0 !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn img,
+    body > .controls-wrapper .control-btn img {
+        width: 18px !important;
+        height: 18px !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn span,
+    body > .controls-wrapper .control-btn span {
+        font-size: 16px;
+    }
+}
+
+/* Адаптивность для очень маленьких экранов */
+@media screen and (max-width: 360px) {
+    .whiteboard-toolbar {
+        left: 2px;
+        padding: 5px 3px;
+        max-height: 70vh;
+        gap: 4px;
+        border-radius: 5px;
+    }
+    
+    .whiteboard-tools {
+        gap: 3px;
+    }
+    
+    .whiteboard-tool-btn {
+        width: 26px;
+        height: 26px;
+        min-width: 26px;
+        font-size: 11px;
+        padding: 4px;
+        border-radius: 3px;
+    }
+    
+    #whiteboard-color {
+        width: 26px;
+        height: 26px;
+        border-radius: 3px;
+    }
+    
+    #whiteboard-width {
+        width: 26px;
+        height: 26px;
+    }
+    
+    .room-header.whiteboard-mode {
+        min-height: 50px !important;
+        max-height: 65px !important;
+        padding: 2px 3px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-container {
+        width: 65px !important;
+        height: 37px !important;
+        min-width: 65px !important;
+        max-width: 65px !important;
+    }
+    
+    .room-header.whiteboard-mode .video-streams {
+        gap: 2px !important;
+    }
+    
+    .main-content.whiteboard-open .controls-wrapper,
+    body > .controls-wrapper {
+        bottom: max(env(safe-area-inset-bottom, 0), 4px) !important;
+        padding: 8px 14px !important;
+        font-size: 10px;
+        width: calc(100% - 16px) !important;
+        max-width: 100% !important;
+        gap: 10px !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn {
+        width: 34px;
+        height: 34px;
+        min-width: 34px;
+        max-width: 34px;
+        padding: 5px;
+        flex-shrink: 0 !important;
+        flex-grow: 0 !important;
+    }
+    
+    .main-content.whiteboard-open .control-btn img {
+        width: 16px;
+        height: 16px;
+    }
+}
+
+/* Индикатор загрузки изображения */
+.image-loading-indicator {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-text {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Адаптивность для индикатора загрузки */
+@media screen and (max-width: 768px) {
+    .image-loading-indicator {
+        padding: 16px 24px;
+    }
+    
+    .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border-width: 3px;
+    }
+    
+    .loading-text {
+        font-size: 12px;
+    }
+}
+

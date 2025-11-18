@@ -7,6 +7,39 @@
   overflow: hidden;
   background: var(--bg-primary);
   border-radius: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+/* Для планшета и мобильных - разрешаем прокрутку */
+@media screen and (max-width: 1024px) {
+  .room-container {
+    position: relative !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow: visible !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+  }
+}
+
+/* Убираем скроллинг со всей страницы (только для ПК) */
+@media screen and (min-width: 1025px) {
+  html, body {
+    overflow: hidden !important;
+    height: 100vh !important;
+    width: 100% !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+  }
 }
 
 /* Header */
@@ -15,15 +48,22 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  background: var(--bg-secondary);
-  box-shadow: var(--shadow-md);
-  z-index: 1000;
+  background: transparent;
+  box-shadow: none;
+  z-index: 2003;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   min-height: 60px;
   transition: transform 0.3s ease, opacity 0.3s ease;
   border-radius: 0;
   position: relative;
+}
+
+/* Header с фоном только в режиме whiteboard */
+.room-header.whiteboard-mode {
+  background: var(--bg-secondary) !important;
+  box-shadow: var(--shadow-md) !important;
+  border-bottom: 1px solid var(--border-color) !important;
 }
 
 /* Скрывать хедер на мобильных устройствах при большом количестве пользователей */
@@ -159,17 +199,162 @@
   min-height: 0;
 }
 
+/* Для планшета - разрешаем прокрутку */
+@media screen and (max-width: 1024px) {
+  .main-content {
+    overflow: visible !important;
+    min-height: auto !important;
+  }
+}
+
+/* Когда доска открыта, камеры перемещаются в header */
+.main-content.whiteboard-open .video-section {
+  display: none;
+}
+
+/* Панель управления должна быть видна поверх доски */
+.controls-wrapper {
+  z-index: 2002;
+  position: relative;
+}
+
+/* Для планшета - гарантируем видимость панели */
+@media screen and (max-width: 1024px) {
+  .controls-wrapper {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 2005 !important;
+  }
+}
+
+.main-content.whiteboard-open .controls-wrapper,
+.whiteboard-section ~ .main-content .controls-wrapper,
+body:has(.whiteboard-section[style*="flex"]) .controls-wrapper,
+body > .controls-wrapper {
+  position: fixed !important;
+  bottom: 20px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 2004 !important;
+  background: var(--bg-secondary) !important;
+  padding: 12px 20px !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: 1px solid var(--border-color) !important;
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: auto !important;
+  min-width: auto !important;
+  height: auto !important;
+  min-height: auto !important;
+}
+
+/* При открытии доски камеры в header */
+.room-header.whiteboard-mode {
+  padding: 6px 12px !important;
+  min-height: 80px !important;
+  max-height: 100px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 2003 !important;
+  background: var(--bg-secondary) !important;
+  width: 100% !important;
+}
+
+.room-header.whiteboard-mode .header-content {
+  display: none !important;
+}
+
+.room-header.whiteboard-mode .video-streams {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 8px !important;
+  padding: 0 !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.room-header.whiteboard-mode .video-container {
+  flex: 0 0 auto !important;
+  width: 120px !important;
+  height: 68px !important;
+  min-width: 120px !important;
+  max-width: 120px !important;
+  border-radius: 6px !important;
+  overflow: hidden !important;
+  box-shadow: var(--shadow-sm) !important;
+  aspect-ratio: unset !important;
+}
+
+.room-header.whiteboard-mode .video-container video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+.room-header.whiteboard-mode .no-cam-placeholder {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.room-header.whiteboard-mode .no-cam-placeholder svg {
+  width: 60px !important;
+  height: 60px !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+}
+
+.room-header.whiteboard-mode .no-cam-placeholder > div {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.room-header.whiteboard-mode .username-wrapper {
+  font-size: 9px !important;
+  padding: 2px 4px !important;
+  bottom: 2px !important;
+  left: 2px !important;
+  right: 2px !important;
+  line-height: 1.2 !important;
+}
+
 /* Video Section */
 .video-section {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   min-width: 0;
   background: var(--bg-primary);
   position: relative;
   width: 100%;
   border-radius: 0;
+}
+
+/* Для планшета - гарантируем видимость */
+@media screen and (max-width: 1024px) {
+  .video-section {
+    overflow: visible !important;
+    min-height: auto !important;
+  }
 }
 
 .video-section.chat-open {
@@ -183,7 +368,7 @@
   padding: 20px;
   padding-bottom: 100px;
   gap: 20px;
-  overflow-y: auto;
+  overflow: hidden;
   align-content: center;
   justify-content: center;
   align-items: center;
@@ -287,6 +472,111 @@
   border: 1px solid var(--border-color);
 }
 
+/* Лоадер для загрузки видео */
+.video-loader {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 10 !important; /* Выше видео (z-index: 2) и placeholder (z-index: 1) */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  pointer-events: none !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+.video-loader .pl {
+  display: block !important;
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+}
+
+.video-loader .pl__ring,
+.video-loader .pl__ball {
+  animation: loader-ring 2s ease-out infinite !important;
+}
+
+.video-loader .pl__ball {
+  animation-name: loader-ball !important;
+}
+
+/* Анимация кольца */
+@keyframes loader-ring {
+  from {
+    stroke-dasharray: 0 257 0 0 1 0 0 258;
+  }
+  25% {
+    stroke-dasharray: 0 0 0 0 257 0 258 0;
+  }
+  50%, to {
+    stroke-dasharray: 0 0 0 0 0 515 0 0;
+  }
+}
+
+/* Анимация шарика */
+@keyframes loader-ball {
+  from, 50% {
+    animation-timing-function: ease-in;
+    stroke-dashoffset: 1;
+  }
+  64% {
+    animation-timing-function: ease-in;
+    stroke-dashoffset: -109;
+  }
+  78% {
+    animation-timing-function: ease-in;
+    stroke-dashoffset: -145;
+  }
+  92% {
+    animation-timing-function: ease-in;
+    stroke-dashoffset: -157;
+  }
+  57%, 71%, 85%, 99%, to {
+    animation-timing-function: ease-out;
+    stroke-dashoffset: -163;
+  }
+}
+
+/* Адаптивность лоадера для разных размеров контейнеров */
+@media screen and (max-width: 1024px) {
+  .video-loader .pl {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+    max-width: 40px !important;
+    max-height: 40px !important;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .video-loader .pl {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    max-width: 36px !important;
+    max-height: 36px !important;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .video-loader .pl {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    min-height: 32px !important;
+    max-width: 32px !important;
+    max-height: 32px !important;
+  }
+}
+
 /* SVG placeholder для выключенной камеры */
 .no-cam-placeholder {
   display: block;
@@ -318,7 +608,7 @@
 
 /* Controls Wrapper */
 .controls-wrapper {
-  display: flex;
+  display: flex !important;
   justify-content: center;
   align-items: center;
   gap: 16px;
@@ -328,11 +618,199 @@
   min-height: 80px;
   height: 80px;
   box-sizing: border-box;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  position: relative;
   z-index: 1001;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* На планшетах и телефонах панель управления всегда должна быть видна */
+@media screen and (max-width: 1024px) {
+  .controls-wrapper {
+    position: fixed !important;
+    bottom: env(safe-area-inset-bottom, 0) !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+    border-top: none !important;
+    box-shadow: none !important;
+    z-index: 2005 !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Горизонтальный режим планшета - полная перестройка для видимости панели */
+@media screen and (max-width: 1024px) and (orientation: landscape) {
+  html, body {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    max-height: none !important;
+    width: 100% !important;
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+  }
+  
+  .room-container {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: calc(100vh - 80px) !important;
+    max-height: none !important;
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding-bottom: 80px !important;
+  }
+  
+  .main-content {
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: calc(100vh - 130px) !important;
+    max-height: none !important;
+  }
+  
+  .video-section {
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: calc(100vh - 130px) !important;
+    max-height: none !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+  }
+  
+  .controls-wrapper {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 2005 !important;
+    padding: 10px 12px !important;
+    gap: 10px !important;
+    min-height: 70px !important;
+    height: auto !important;
+    background: rgba(0, 0, 0, 0.7) !important;
+    backdrop-filter: blur(10px) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3) !important;
+  }
+  
+  /* Оптимизируем область для видео - убираем лишние отступы */
+  .video-streams {
+    padding: 8px !important;
+    padding-bottom: 80px !important;
+    gap: 8px !important;
+    overflow: visible !important;
+    flex: 0 1 auto !important;
+    min-height: auto !important;
+    max-height: calc(100vh - 130px) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+  }
+  
+  /* Оптимизируем размеры видео контейнеров - используем проценты от высоты экрана */
+  .video-streams.single-user {
+    padding: 8px !important;
+    padding-bottom: 80px !important;
+  }
+  
+  .video-streams.single-user .video-container {
+    width: calc(100vh - 130px) !important;
+    height: calc(100vh - 130px) !important;
+    max-width: calc(100vh - 130px) !important;
+    max-height: calc(100vh - 130px) !important;
+    min-width: 200px !important;
+    min-height: 200px !important;
+  }
+  
+  .video-streams.two-users {
+    padding: 8px !important;
+    padding-bottom: 80px !important;
+  }
+  
+  .video-streams.two-users .video-container {
+    width: calc((100vh - 150px) / 2) !important;
+    height: calc((100vh - 150px) / 2) !important;
+    max-width: calc((100vh - 150px) / 2) !important;
+    max-height: calc((100vh - 150px) / 2) !important;
+    min-width: 150px !important;
+    min-height: 150px !important;
+  }
+  
+  .video-streams.multiple-users .video-container {
+    width: calc(50% - 4px) !important;
+    max-width: calc(50% - 4px) !important;
+    max-height: calc((100vh - 150px) / 2) !important;
+    min-width: 150px !important;
+    min-height: 150px !important;
+  }
+  
+  .video-streams.many-users .video-container {
+    width: calc(33.333% - 6px) !important;
+    max-width: calc(33.333% - 6px) !important;
+    max-height: calc((100vh - 150px) / 3) !important;
+    min-width: 120px !important;
+    min-height: 120px !important;
+  }
+  
+  .video-container {
+    min-width: 120px !important;
+    min-height: 120px !important;
+    max-height: calc(100vh - 150px) !important;
+  }
+  
+  /* Улучшаем адаптивность кнопок управления */
+  .control-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    padding: 8px !important;
+    flex-shrink: 0 !important;
+  }
+  
+  .control-btn img {
+    width: 18px !important;
+    height: 18px !important;
+  }
+  
+  .room-header {
+    padding: 8px 12px !important;
+    min-height: 45px !important;
+    flex-shrink: 0 !important;
+  }
+  
+  .room-header h2 {
+    font-size: 14px !important;
+  }
+  
+  /* Уменьшаем размеры username */
+  .username-wrapper {
+    font-size: 10px !important;
+    padding: 3px 6px !important;
+    bottom: 6px !important;
+    left: 6px !important;
+  }
 }
 
 .control-btn {
@@ -496,36 +974,139 @@
 }
 
 @media screen and (max-width: 1024px) {
+  html, body {
+    overflow: auto !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    width: 100% !important;
+    position: relative !important;
+  }
+  
+  .room-container {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .video-section {
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+  }
+  
+  .room-header {
+    padding: 12px 18px;
+    min-height: 55px;
+    background: transparent !important;
+  }
+  
+  .room-header.whiteboard-mode {
+    background: var(--bg-secondary) !important;
+  }
+  
+  .room-header h2 {
+    font-size: 18px;
+  }
+  
   .chat-section {
-    width: 340px;
+    width: 320px;
+    min-width: 280px;
+  }
+  
+  .video-streams {
+    padding: 15px;
+    padding-bottom: 120px;
+    gap: 15px;
+    overflow: visible !important;
   }
   
   .video-streams.single-user .video-container {
-    width: min(calc(100vh - 180px), calc(100% - 30px));
-    height: min(calc(100vh - 180px), calc(100% - 30px));
-    max-width: 600px;
-    max-height: 600px;
+    width: min(calc(100vh - 170px), calc(100% - 30px));
+    height: min(calc(100vh - 170px), calc(100% - 30px));
+    max-width: 550px;
+    max-height: 550px;
   }
   
   .video-streams.two-users .video-container {
-    width: min(calc(50% - 8px), calc((100vh - 180px) / 2));
-    height: min(calc(50% - 8px), calc((100vh - 180px) / 2));
-    max-width: 400px;
-    max-height: 400px;
-    min-width: 250px;
-    min-height: 250px;
+    width: min(calc(50% - 8px), calc((100vh - 170px) / 2));
+    height: min(calc(50% - 8px), calc((100vh - 170px) / 2));
+    max-width: 380px;
+    max-height: 380px;
+    min-width: 240px;
+    min-height: 240px;
   }
   
   .video-container {
     min-width: 200px;
     min-height: 200px;
   }
+  
+  .controls-wrapper {
+    padding: 18px 20px !important;
+    gap: 14px !important;
+    min-height: 75px !important;
+    height: auto !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+    border-top: none !important;
+    box-shadow: none !important;
+    z-index: 2005 !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    margin-top: auto !important;
+  }
+  
+  /* Горизонтальный режим планшета (внутри основного медиа-запроса) */
+  @media screen and (orientation: landscape) {
+    .controls-wrapper {
+      bottom: 0 !important;
+      position: sticky !important;
+      margin-top: auto !important;
+    }
+  }
+  
+  .control-btn {
+    width: 52px;
+    height: 52px;
+  }
+  
+  .control-btn img {
+    width: 22px;
+    height: 22px;
+  }
 }
 
 @media screen and (max-width: 768px) {
+  html, body {
+    overflow: hidden !important;
+    height: 100vh !important;
+    width: 100% !important;
+    position: fixed !important;
+  }
+  
+  .room-container {
+    overflow: hidden !important;
+    height: 100vh !important;
+    position: fixed !important;
+  }
+  
   .room-header {
-    padding: 12px 16px;
-    min-height: 50px;
+    padding: 10px 14px;
+    min-height: 48px;
+    background: transparent !important;
+  }
+  
+  .room-header.whiteboard-mode {
+    background: var(--bg-secondary) !important;
   }
   
   .room-header.hidden {
@@ -535,23 +1116,29 @@
   }
   
   .room-header h2 {
-    font-size: 16px;
+    font-size: 15px;
   }
   
   .invite-link-container {
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     max-width: 100%;
   }
   
   .invite-link-input {
     width: 100%;
-    font-size: 11px;
+    font-size: 10px;
+    padding: 5px 10px;
+  }
+  
+  .copy-invite-btn {
+    padding: 5px 12px;
+    font-size: 10px;
   }
   
   .chat-section {
     width: 100%;
-    top: 60px;
+    top: 48px;
     bottom: 70px;
   }
   
@@ -562,109 +1149,83 @@
   }
   
   .video-streams {
-    padding: 15px;
-    padding-bottom: 90px;
-    gap: 15px;
-  }
-  
-  .video-streams.single-user .video-container {
-    width: min(calc(100vh - 150px), calc(100% - 30px));
-    height: min(calc(100vh - 150px), calc(100% - 30px));
-    max-width: 500px;
-    max-height: 500px;
-  }
-  
-  .video-streams.two-users .video-container {
-    width: min(calc(50% - 8px), calc((100vh - 150px) / 2));
-    height: min(calc(50% - 8px), calc((100vh - 150px) / 2));
-    max-width: 350px;
-    max-height: 350px;
-    min-width: 200px;
-    min-height: 200px;
-  }
-  
-  .controls-wrapper {
-    padding: 16px;
-    gap: 12px;
-    min-height: 70px;
-    height: 70px;
-    background: transparent;
-    bottom: 0;
-  }
-  
-  .control-btn {
-    width: 50px;
-    height: 50px;
-  }
-  
-  .control-btn img {
-    width: 22px;
-    height: 22px;
-  }
-}
-
-@media screen and (max-width: 480px) {
-  .room-header {
-    padding: 10px 12px;
-  }
-  
-  .room-header h2 {
-    font-size: 14px;
-  }
-  
-  .video-streams {
-    padding: 10px;
-    padding-bottom: 85px;
-    gap: 10px;
-  }
-  
-  .video-streams.single-user .video-container {
-    width: min(calc(100vh - 130px), calc(100% - 20px));
-    height: min(calc(100vh - 130px), calc(100% - 20px));
-    max-width: 400px;
-    max-height: 400px;
-  }
-  
-  .video-streams.two-users .video-container {
-    width: min(calc(50% - 5px), calc((100vh - 130px) / 2));
-    height: min(calc(50% - 5px), calc((100vh - 130px) / 2));
-    max-width: 250px;
-    max-height: 250px;
-    min-width: 150px;
-    min-height: 150px;
-  }
-  
-  .video-container {
-    min-height: 180px;
-    max-height: calc(45vh - 15px);
-  }
-  
-  .username-wrapper {
-    font-size: 12px;
-    padding: 6px 12px;
-    bottom: 12px;
-    left: 12px;
-  }
-  
-  .controls-wrapper {
     padding: 12px;
+    padding-bottom: 85px;
+    gap: 12px;
+    overflow: hidden !important;
+  }
+  
+  .video-streams.single-user .video-container {
+    width: min(calc(100vh - 140px), calc(100% - 24px));
+    height: min(calc(100vh - 140px), calc(100% - 24px));
+    max-width: 450px;
+    max-height: 450px;
+  }
+  
+  .video-streams.two-users .video-container {
+    width: min(calc(50% - 6px), calc((100vh - 140px) / 2));
+    height: min(calc(50% - 6px), calc((100vh - 140px) / 2));
+    max-width: 320px;
+    max-height: 320px;
+    min-width: 180px;
+    min-height: 180px;
+  }
+  
+  .controls-wrapper {
+    padding: 14px 16px;
     gap: 10px;
-    min-height: 65px;
-    height: 65px;
-    background: transparent;
-    bottom: 0;
+    min-height: 68px;
+    height: 68px;
+    position: fixed !important;
+    bottom: env(safe-area-inset-bottom, 0) !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+    border-top: none !important;
+    box-shadow: none !important;
+    z-index: 2005 !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
-  .chat-section {
-    top: 50px;
-    bottom: 65px;
+  .main-content.whiteboard-open .controls-wrapper,
+  body > .controls-wrapper.whiteboard-mode {
+    position: fixed !important;
+    bottom: max(env(safe-area-inset-bottom, 0), 8px) !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 2004 !important;
+    background: var(--bg-secondary) !important;
+    padding: 12px 18px !important;
+    border-radius: 10px !important;
+    box-shadow: var(--shadow-lg) !important;
+    border: 1px solid var(--border-color) !important;
+    width: auto !important;
+    gap: 16px !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
   
-  .username-wrapper {
-    font-size: 11px;
-    padding: 6px 10px;
-    bottom: 10px;
-    left: 10px;
+  .main-content.whiteboard-open .control-btn,
+  body > .controls-wrapper.whiteboard-mode .control-btn {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+    flex-shrink: 0 !important;
+    flex-grow: 0 !important;
+  }
+  
+  .main-content.whiteboard-open .control-btn img,
+  body > .controls-wrapper.whiteboard-mode .control-btn img {
+    width: 20px !important;
+    height: 20px !important;
   }
   
   .control-btn {
@@ -675,5 +1236,152 @@
   .control-btn img {
     width: 20px;
     height: 20px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  html, body {
+    overflow: hidden !important;
+    height: 100vh !important;
+    width: 100% !important;
+    position: fixed !important;
+  }
+  
+  .room-container {
+    overflow: hidden !important;
+    height: 100vh !important;
+    position: fixed !important;
+  }
+  
+  .room-header {
+    padding: 8px 10px;
+    min-height: 45px;
+    background: transparent !important;
+  }
+  
+  .room-header.whiteboard-mode {
+    background: var(--bg-secondary) !important;
+  }
+  
+  .room-header h2 {
+    font-size: 13px;
+  }
+  
+  .invite-link-input {
+    font-size: 9px;
+    padding: 4px 8px;
+  }
+  
+  .copy-invite-btn {
+    padding: 4px 10px;
+    font-size: 9px;
+  }
+  
+  .video-streams {
+    padding: 8px;
+    padding-bottom: 80px;
+    gap: 8px;
+    overflow: hidden !important;
+  }
+  
+  .video-streams.single-user .video-container {
+    width: min(calc(100vh - 125px), calc(100% - 16px));
+    height: min(calc(100vh - 125px), calc(100% - 16px));
+    max-width: 350px;
+    max-height: 350px;
+  }
+  
+  .video-streams.two-users .video-container {
+    width: min(calc(50% - 4px), calc((100vh - 125px) / 2));
+    height: min(calc(50% - 4px), calc((100vh - 125px) / 2));
+    max-width: 220px;
+    max-height: 220px;
+    min-width: 140px;
+    min-height: 140px;
+  }
+  
+  .video-container {
+    min-height: 160px;
+    max-height: calc(42vh - 12px);
+  }
+  
+  .username-wrapper {
+    font-size: 10px;
+    padding: 4px 8px;
+    bottom: 8px;
+    left: 8px;
+  }
+  
+  .controls-wrapper {
+    padding: 10px 12px;
+    gap: 8px;
+    min-height: 62px;
+    height: 62px;
+    position: fixed !important;
+    bottom: env(safe-area-inset-bottom, 0) !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+    border-top: none !important;
+    box-shadow: none !important;
+    z-index: 2005 !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  
+  .main-content.whiteboard-open .controls-wrapper,
+  body > .controls-wrapper.whiteboard-mode {
+    position: fixed !important;
+    bottom: max(env(safe-area-inset-bottom, 0), 6px) !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 2004 !important;
+    background: var(--bg-secondary) !important;
+    padding: 10px 16px !important;
+    border-radius: 8px !important;
+    box-shadow: var(--shadow-lg) !important;
+    border: 1px solid var(--border-color) !important;
+    width: calc(100% - 20px) !important;
+    max-width: 100% !important;
+    gap: 14px !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  
+  .main-content.whiteboard-open .control-btn,
+  body > .controls-wrapper.whiteboard-mode .control-btn {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    max-width: 38px !important;
+    flex-shrink: 0 !important;
+    flex-grow: 0 !important;
+  }
+  
+  .main-content.whiteboard-open .control-btn img,
+  body > .controls-wrapper.whiteboard-mode .control-btn img {
+    width: 18px !important;
+    height: 18px !important;
+  }
+  
+  .chat-section {
+    top: 45px;
+    bottom: 62px;
+  }
+  
+  .control-btn {
+    width: 44px;
+    height: 44px;
+  }
+  
+  .control-btn img {
+    width: 18px;
+    height: 18px;
   }
 }

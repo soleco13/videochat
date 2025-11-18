@@ -13,4 +13,5 @@ urlpatterns = [
     path('get_member/', views.getMember),
     path('delete_member/', views.deleteMember),
     path('get_room_members/', views.getRoomMembers),
+    path('upload_whiteboard_image/', views.upload_whiteboard_image),
 ]

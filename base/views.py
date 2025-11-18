@@ -1,10 +1,15 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 import random
 from .models import RoomMember, Room
 import json
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
+import os
+import uuid
+from django.conf import settings
+from pathlib import Path
+import shutil
 
 
 
@@ -150,3 +155,94 @@ def create_room(request):
         })
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+def upload_whiteboard_image(request):
+    """Upload image for whiteboard and return URL"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+    try:
+        room_name = request.POST.get('room_name', '').upper()
+        if not room_name:
+            return JsonResponse({'error': 'Room name is required'}, status=400)
+        
+        # Проверяем, что комната существует
+        try:
+            room_obj = Room.objects.get(name=room_name, is_active=True)
+        except Room.DoesNotExist:
+            return JsonResponse({'error': 'Room not found'}, status=404)
+        
+        if 'image' not in request.FILES:
+            return JsonResponse({'error': 'No image file provided'}, status=400)
+        
+        image_file = request.FILES['image']
+        
+        # Проверяем тип файла
+        if not image_file.content_type.startswith('image/'):
+            return JsonResponse({'error': 'File is not an image'}, status=400)
+        
+        # Создаем директорию для комнаты если её нет
+        room_images_dir = Path(settings.MEDIA_ROOT) / 'whiteboard' / room_name
+        room_images_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Получаем расширение файла из оригинального имени или content_type
+        original_name = image_file.name
+        file_extension = os.path.splitext(original_name)[1].lower() if original_name else '.jpg'
+        
+        # Если расширение не определено, определяем по content_type
+        if not file_extension or file_extension == '.':
+            content_type = image_file.content_type
+            if 'jpeg' in content_type or 'jpg' in content_type:
+                file_extension = '.jpg'
+            elif 'png' in content_type:
+                file_extension = '.png'
+            elif 'gif' in content_type:
+                file_extension = '.gif'
+            elif 'webp' in content_type:
+                file_extension = '.webp'
+            else:
+                file_extension = '.jpg'  # По умолчанию JPEG
+        
+        # Генерируем уникальное имя файла с сохранением оригинального расширения
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = room_images_dir / unique_filename
+        
+        # Сохраняем файл без сжатия (изображение уже сжато на клиенте)
+        try:
+            with open(file_path, 'wb') as destination:
+                for chunk in image_file.chunks():
+                    destination.write(chunk)
+            
+            file_size = file_path.stat().st_size
+            print(f"[Whiteboard] Image saved: {unique_filename}, file size: {file_size} bytes")
+            
+        except Exception as e:
+            print(f"[Whiteboard] Error saving image: {e}")
+            return JsonResponse({'error': f'Failed to save image: {str(e)}'}, status=500)
+        
+        # Формируем URL для доступа к изображению
+        image_url = f"/media/whiteboard/{room_name}/{unique_filename}"
+        
+        return JsonResponse({
+            'success': True,
+            'url': image_url,
+            'filename': unique_filename
+        })
+    
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def cleanup_room_images(room_name):
+    """Удалить все изображения комнаты"""
+    try:
+        room_images_dir = Path(settings.MEDIA_ROOT) / 'whiteboard' / room_name.upper()
+        if room_images_dir.exists():
+            shutil.rmtree(room_images_dir)
+            return True
+    except Exception as e:
+        print(f"Error cleaning up room images: {e}")
+        return False
+    return False

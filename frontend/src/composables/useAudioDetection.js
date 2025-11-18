@@ -45,18 +45,34 @@ export function useAudioDetection() {
     }
   }
   
+  // Оптимизация: уменьшаем частоту анализа для экономии ресурсов
+  let lastAnalysisTime = 0
+  const ANALYSIS_INTERVAL = 16 // ~60fps (каждый кадр)
+  
   const analyzeAudio = () => {
     if (!analyser.value || !dataArray.value) return
+    
+    const now = Date.now()
+    // Оптимизация: пропускаем анализ, если прошло мало времени
+    if (now - lastAnalysisTime < ANALYSIS_INTERVAL) {
+      animationFrameId.value = requestAnimationFrame(analyzeAudio)
+      return
+    }
+    lastAnalysisTime = now
     
     // Получаем данные об уровне звука
     analyser.value.getByteFrequencyData(dataArray.value)
     
-    // Вычисляем средний уровень звука
+    // Оптимизация: используем более эффективный способ вычисления среднего
+    // Берем только каждую 4-ю точку для ускорения (можно настроить)
     let sum = 0
-    for (let i = 0; i < dataArray.value.length; i++) {
+    let count = 0
+    const step = 4 // Пропускаем каждые 3 точки
+    for (let i = 0; i < dataArray.value.length; i += step) {
       sum += dataArray.value[i]
+      count++
     }
-    const average = sum / dataArray.value.length
+    const average = count > 0 ? sum / count : 0
     
     // Применяем сглаживание
     const smoothedLevel = lastLevel * SMOOTHING_FACTOR + average * (1 - SMOOTHING_FACTOR)

@@ -20,12 +20,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-o8sfycr9zmtd!u(zkajst*wo7iijq07fhjfpv4msk%ws2442$$'
+# Используем переменную окружения для безопасности
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-o8sfycr9zmtd!u(zkajst*wo7iijq07fhjfpv4msk%ws2442$$')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG из переменной окружения, по умолчанию False для безопасности
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+# ALLOWED_HOSTS из переменной окружения или конкретные хосты
+ALLOWED_HOSTS_ENV = os.environ.get('DJANGO_ALLOWED_HOSTS')
+if ALLOWED_HOSTS_ENV:
+    ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_ENV.split(',')]
+else:
+    # По умолчанию localhost и IP сервера для работы
+    # В продакшене рекомендуется использовать переменную окружения DJANGO_ALLOWED_HOSTS
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '144.31.75.55']
 
 
 # Application definition
@@ -82,6 +91,18 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
             "hosts": [("127.0.0.1", 6379)],
+            # КРИТИЧНО: Увеличено для WebRTC (много ICE кандидатов)
+            "capacity": 10000,  # Максимум сообщений в канале (было 5000)
+            # ⚠️ ВАЖНО: Баланс между очисткой и достаточным временем для обработки
+            "expiry": 10,  # Удаляем сообщения через 10 секунд (было 5 - слишком быстро)
+            # Очистка групп
+            "group_expiry": 120,  # Группы живут 120 секунд после последней активности (было 60)
+            # Дополнительные настройки для производительности
+            "channel_capacity": {
+                "http.request": 5000,
+                "http.response!*": 5000,
+                "websocket.send": 10000,  # КРИТИЧНО: Увеличено для WebRTC ICE кандидатов
+            },
         },
     },
 }

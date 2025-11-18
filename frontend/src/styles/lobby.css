@@ -1,11 +1,26 @@
 /* Lobby Page Styles */
+html, body {
+  overflow: hidden !important;
+  height: 100vh !important;
+  width: 100% !important;
+  position: fixed !important;
+}
+
 main {
-  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-primary);
   padding: 20px;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
 }
 
 #form-container {
@@ -16,6 +31,30 @@ main {
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border-color);
+  margin: auto;
+  box-sizing: border-box;
+  overflow-y: auto;
+  max-height: 100vh;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-active) var(--bg-secondary);
+}
+
+#form-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+#form-container::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 3px;
+}
+
+#form-container::-webkit-scrollbar-thumb {
+  background: var(--accent-active);
+  border-radius: 3px;
+}
+
+#form-container::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-inactive);
 }
 
 #logo {
@@ -177,12 +216,30 @@ main {
 }
 
 /* Responsive */
-@media screen and (max-width: 480px) {
-  #form-container {
-    padding: 30px 20px;
-    max-width: 100%;
+@media screen and (max-width: 1024px) {
+  main {
+    padding: 10px;
+    align-items: center;
+    justify-content: center;
   }
-
+  
+  #form-container {
+    padding: 25px 20px;
+    max-width: 400px;
+    margin: auto;
+    max-height: calc(100vh - 20px);
+  }
+  
+  #logo {
+    width: 80px;
+    height: 80px;
+    margin-bottom: 20px;
+  }
+  
+  #welcome-message {
+    margin-bottom: 20px;
+  }
+  
   #welcome-message h1 {
     font-size: 24px;
   }
@@ -191,9 +248,180 @@ main {
     font-size: 14px;
   }
   
+  .field-wrapper {
+    gap: 15px;
+  }
+  
   .form-field input {
-    padding: 12px 16px;
+    padding: 12px 14px;
     font-size: 14px;
+  }
+  
+  #invite-section {
+    padding: 15px;
+    margin-top: 15px;
+  }
+  
+  #invite-section h3 {
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  
+  .invite-link-wrapper {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  
+  #invite-link {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  
+  .copy-btn {
+    padding: 10px 16px;
+    font-size: 12px;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  main {
+    padding: 12px;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  #form-container {
+    padding: 30px 24px;
+    max-width: 100%;
+    margin: auto;
+    max-height: calc(100vh - 24px);
+  }
+  
+  #logo {
+    width: 80px;
+    height: 80px;
+    margin-bottom: 20px;
+  }
+  
+  #welcome-message {
+    margin-bottom: 25px;
+  }
+  
+  #welcome-message h1 {
+    font-size: 26px;
+  }
+  
+  #welcome-message p {
+    font-size: 14px;
+  }
+  
+  .field-wrapper {
+    gap: 18px;
+  }
+  
+  .form-field input {
+    padding: 12px 15px;
+    font-size: 14px;
+  }
+  
+  #invite-section {
+    padding: 16px;
+    margin-top: 18px;
+  }
+  
+  #invite-section h3 {
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  
+  .invite-link-wrapper {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  
+  #invite-link {
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+  
+  .copy-btn {
+    padding: 10px 18px;
+    font-size: 12px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  main {
+    padding: 10px;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  #form-container {
+    padding: 25px 18px;
+    max-width: 100%;
+    margin: auto;
+    max-height: calc(100vh - 20px);
+  }
+
+  #logo {
+    width: 70px;
+    height: 70px;
+    margin-bottom: 18px;
+  }
+  
+  #welcome-message {
+    margin-bottom: 20px;
+  }
+  
+  #welcome-message h1 {
+    font-size: 22px;
+  }
+  
+  #welcome-message p {
+    font-size: 13px;
+  }
+  
+  .field-wrapper {
+    gap: 15px;
+  }
+  
+  .form-field label {
+    font-size: 12px;
+  }
+  
+  .form-field input {
+    padding: 11px 14px;
+    font-size: 13px;
+  }
+  
+  #invite-section {
+    padding: 14px;
+    margin-top: 15px;
+  }
+  
+  #invite-section h3 {
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  
+  .invite-link-wrapper {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  
+  #invite-link {
+    padding: 9px 12px;
+    font-size: 11px;
+  }
+  
+  .copy-btn {
+    padding: 9px 16px;
+    font-size: 11px;
+  }
+  
+  #invite-section p {
+    font-size: 11px;
   }
 }
 

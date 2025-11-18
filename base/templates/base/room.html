@@ -7,6 +7,7 @@
 <link rel="stylesheet" type="text/css" href="{% static 'styles/theme.css' %}?v={{ STATIC_VERSION|default:'1' }}">
 <link rel="stylesheet" type="text/css" href="{% static 'styles/room.css' %}?v={{ STATIC_VERSION|default:'1' }}">
 <link rel="stylesheet" type="text/css" href="{% static 'styles/chat.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+<link rel="stylesheet" type="text/css" href="{% static 'styles/whiteboard.css' %}?v={{ STATIC_VERSION|default:'1' }}">
 <!-- Import map for module resolution (must be before module scripts) -->
 <script type="importmap">
 {
@@ -19,6 +20,7 @@
 <link rel="stylesheet" href="http://localhost:5173/styles/theme.css">
 <link rel="stylesheet" href="http://localhost:5173/styles/room.css">
 <link rel="stylesheet" href="http://localhost:5173/styles/chat.css">
+<link rel="stylesheet" href="http://localhost:5173/styles/whiteboard.css">
 {% endif %}
 {% endblock %}
 
@@ -48,6 +50,9 @@
                 
                 <!-- Controls -->
                 <div class="controls-wrapper">
+                    <button id="whiteboard-toggle-btn" class="control-btn whiteboard-toggle-btn" title="Доска">
+                        <span>🖊️</span>
+                    </button>
                     <button id="chat-toggle-btn" class="control-btn chat-toggle-btn">
                         <img src="{% endverbatim %}{% static 'images/message.svg' %}{% verbatim %}" alt="Chat" />
                         <span class="chat-badge" id="chat-badge" style="display: none;">0</span>
@@ -77,6 +82,33 @@
                         class="chat-input"
                     />
                     <button id="send-message-btn" class="send-btn">Send</button>
+                </div>
+            </div>
+            
+            <!-- Whiteboard Section -->
+            <div class="whiteboard-section" id="whiteboard-section" style="display: none;">
+                <canvas id="whiteboard-canvas"></canvas>
+                <div class="whiteboard-toolbar">
+                    <div class="whiteboard-tools">
+                        <button class="whiteboard-tool-btn" data-tool="brush" title="Кисть">
+                            <span>✏️</span>
+                        </button>
+                        <button class="whiteboard-tool-btn" data-tool="select" title="Выбор">
+                            <span>👆</span>
+                        </button>
+                        <button class="whiteboard-tool-btn" data-tool="eraser" title="Ластик">
+                            <span>🧹</span>
+                        </button>
+                        <input type="color" id="whiteboard-color" value="#000000" title="Цвет">
+                        <input type="range" id="whiteboard-width" min="1" max="20" value="3" title="Толщина">
+                        <button class="whiteboard-tool-btn" id="whiteboard-clear" title="Очистить">
+                            <span>🗑️</span>
+                        </button>
+                        <input type="file" id="whiteboard-image-input" accept="image/*" style="display: none;" title="Загрузить изображение">
+                        <button class="whiteboard-tool-btn" id="whiteboard-image-btn" title="Загрузить изображение">
+                            <span>🖼️</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
