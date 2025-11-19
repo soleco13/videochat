@@ -10,6 +10,8 @@ from channels.layers import get_channel_layer
 from channels.exceptions import StopConsumer
 import redis
 from base.views import cleanup_room_images
+from base.screen_sharing_service import ScreenSharingService
+from base.screen_sharing_handlers import ScreenSharingHandlers
 
 # Максимальное количество участников в комнате
 MAX_ROOM_SIZE = int(os.environ.get('MAX_ROOM_SIZE', '20'))
@@ -27,7 +29,8 @@ VALID_MESSAGE_TYPES = {
     'whiteboard-draw', 'whiteboard-object', 'whiteboard-cursor', 'whiteboard-clear',
     'turn-server-used',  # Для логирования используемых TURN серверов
     'turn-test-start',   # Начало тестирования TURN серверов
-    'turn-test-complete' # Завершение тестирования TURN серверов
+    'turn-test-complete', # Завершение тестирования TURN серверов
+    'screen-share-start', 'screen-share-stop', 'screen-share-request-state'  # Демонстрация экрана
 }
 
 # Валидация UID: только буквы, цифры, дефисы и подчеркивания, максимум 50 символов
@@ -108,6 +111,36 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 print(f"[Cleanup] Room {self.room_name} is now empty")
                 # Очищаем состояние доски когда комната становится пустой
                 await self._clear_whiteboard_state()
+                # Очищаем состояние демонстрации экрана
+                ScreenSharingService.cleanup_room(self.room_name)
+        
+        # 3. Если отключается пользователь, который демонстрировал экран, останавливаем демонстрацию
+        if user_uid_for_log:
+            sharing_user = ScreenSharingService.get_sharing_user(self.room_name)
+            if sharing_user == user_uid_for_log:
+                ScreenSharingService.force_stop_sharing(self.room_name)
+                # Уведомляем остальных пользователей
+                try:
+                    await asyncio.wait_for(
+                        self.channel_layer.group_send(
+                            self.room_group_name,
+                            {
+                                "type": "webrtc_signal",
+                                "message": {
+                                    "type": "screen-share-stopped",
+                                    "from": user_uid_for_log,
+                                    "room": self.room_name,
+                                    "sharing_user": user_uid_for_log,
+                                    "reason": "user_disconnected"
+                                },
+                                "sender_channel": self.channel_name,
+                                "target_id": None,
+                            }
+                        ),
+                        timeout=0.5
+                    )
+                except (asyncio.TimeoutError, Exception) as e:
+                    print(f"[Cleanup] Error notifying screen share stop (non-critical): {e}")
         
         # 3. Отправляем user-left сообщение (если есть UID) - БЕЗ задержки, с таймаутом
         if user_uid_for_log:
@@ -533,6 +566,17 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             
             # Отправляем состояние доски новому пользователю
             await self._send_whiteboard_state(sender_id)
+            
+            # Отправляем состояние демонстрации экрана новому пользователю
+            sharing_state = ScreenSharingService.get_sharing_state(self.room_name)
+            if sharing_state:
+                await self._send_message_internal({
+                    "type": "screen-share-state",
+                    "from": "system",
+                    "to": sender_id,
+                    "is_active": True,
+                    "sharing_user": sharing_state['sharing_user_uid']
+                })
         # Handle 'user-left' message - broadcast immediately
         elif message_type == 'user-left':
             # Broadcast user-left immediately to all users
@@ -589,6 +633,29 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                     else:
                         latency_str = f"{latency:.0f}ms"
                     print(f"   {status} {result.get('name')}: {latency_str}{reason}")
+        elif message_type == 'screen-share-start':
+            # Обработка запроса на начало демонстрации экрана
+            result = await ScreenSharingHandlers.handle_screen_share_start(self, text_data_json)
+            if result.get('type') == 'screen-share-started':
+                # Broadcast всем пользователям
+                await self._send_message_internal(result)
+            elif result.get('type') == 'screen-share-error':
+                # Отправляем ошибку только запросившему пользователю
+                await self._send_message_internal(result)
+        elif message_type == 'screen-share-stop':
+            # Обработка запроса на остановку демонстрации экрана
+            result = await ScreenSharingHandlers.handle_screen_share_stop(self, text_data_json)
+            if result.get('type') == 'screen-share-stopped':
+                # Broadcast всем пользователям
+                await self._send_message_internal(result)
+            elif result.get('type') == 'screen-share-error':
+                # Отправляем ошибку только запросившему пользователю
+                await self._send_message_internal(result)
+        elif message_type == 'screen-share-request-state':
+            # Обработка запроса на получение состояния демонстрации экрана
+            result = await ScreenSharingHandlers.handle_screen_share_request_state(self, text_data_json)
+            # Отправляем состояние только запросившему пользователю
+            await self._send_message_internal(result)
         else:
             # Сохраняем состояние доски для whiteboard-object, whiteboard-draw и whiteboard-clear
             if message_type in ['whiteboard-object', 'whiteboard-draw', 'whiteboard-clear']:

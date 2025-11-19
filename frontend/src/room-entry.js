@@ -621,6 +621,10 @@ async function initApp() {
         loaderHidden: {},
         // Состояние аудио для каждого пользователя (по UID)
         userAudioStates: {},
+        // Качество связи для каждого пользователя (по UID)
+        connectionQuality: {},
+        // Задержка (RTT) для каждого пользователя (по UID) в миллисекундах
+        connectionLatency: {},
         // Имена пользователей (по UID)
         userNames: {},
         // Whiteboard
@@ -636,7 +640,16 @@ async function initApp() {
         configurationReady: false,  // Флаг готовности оптимизированной конфигурации
         // Очередь для последовательного создания соединений (для стабильности при 3+ пользователях)
         connectionQueue: [],
-        isProcessingQueue: false
+        isProcessingQueue: false,
+        // Демонстрация экрана
+        isScreenSharing: false,
+        screenShareStream: null,
+        screenShareTrack: null,
+        screenAudioTrack: null,  // Аудио трек из экрана
+        micTrack: null, // Трек микрофона (для использования при демонстрации экрана)
+        mixedAudioStream: null,  // Микшированный аудио стрим (микрофон + звук экрана)
+        audioContext: null,  // Web Audio API контекст для микширования
+        currentSharingUser: null  // UID пользователя, который демонстрирует экран
     };
     
     // Асинхронная инициализация оптимизированной конфигурации
@@ -987,29 +1000,65 @@ async function initApp() {
         const micBtn = document.getElementById('toggle-mic-btn');
         const cameraBtn = document.getElementById('toggle-camera-btn');
         
-        // Синхронизируем состояние с реальным состоянием треков, если стрим доступен
-        if (state.localStream) {
+        // ВАЖНО: при демонстрации экрана состояние микрофона берется из state.isAudioEnabled,
+        // а не из трека в localStream, так как трек может быть микшированным
+        if (!state.isScreenSharing && state.localStream) {
             const audioTracks = state.localStream.getAudioTracks();
             const videoTracks = state.localStream.getVideoTracks();
             
             if (audioTracks.length > 0) {
-                state.isAudioEnabled = audioTracks[0].enabled;
+                // Ищем трек микрофона (не микшированный, не из экрана)
+                const micTrack = audioTracks.find(track => 
+                    track !== state.mixedAudioStream?.getAudioTracks()[0] &&
+                    track !== state.screenAudioTrack
+                );
+                if (micTrack) {
+                    state.isAudioEnabled = micTrack.enabled;
+                } else if (audioTracks.length > 0) {
+                    // Если не нашли отдельный трек микрофона, используем первый трек
+                    state.isAudioEnabled = audioTracks[0].enabled;
+                }
             }
             
             if (videoTracks.length > 0) {
                 state.isVideoEnabled = videoTracks[0].enabled;
             }
         }
+        // При демонстрации экрана используем state.isAudioEnabled напрямую (не синхронизируем с треками)
         
         if (micBtn) {
             // active = включено (нет перечеркивания), не active = выключено (есть перечеркивание)
             micBtn.classList.toggle('active', state.isAudioEnabled);
-            console.log('[Controls] Mic button active:', state.isAudioEnabled, 'state.isAudioEnabled:', state.isAudioEnabled);
+            // Убеждаемся, что кнопка кликабельна
+            micBtn.disabled = false;
+            console.log('[Controls] Mic button active:', state.isAudioEnabled, 'state.isAudioEnabled:', state.isAudioEnabled, 'isScreenSharing:', state.isScreenSharing);
         }
         if (cameraBtn) {
             // active = включено (нет перечеркивания), не active = выключено (есть перечеркивание)
             cameraBtn.classList.toggle('active', state.isVideoEnabled);
             console.log('[Controls] Camera button active:', state.isVideoEnabled, 'state.isVideoEnabled:', state.isVideoEnabled);
+        }
+    }
+    
+    function updateScreenShareButton() {
+        const screenShareBtn = document.getElementById('toggle-screen-share-btn');
+        if (!screenShareBtn) return;
+        
+        // Проверяем, можем ли мы начать демонстрацию экрана
+        const canStartSharing = !state.currentSharingUser || state.currentSharingUser === state.uid;
+        const isSharing = state.isScreenSharing && state.currentSharingUser === state.uid;
+        
+        // Обновляем состояние кнопки
+        screenShareBtn.classList.toggle('active', isSharing);
+        screenShareBtn.classList.toggle('disabled', !canStartSharing && !isSharing);
+        
+        // Обновляем title для подсказки
+        if (isSharing) {
+            screenShareBtn.title = 'Остановить демонстрацию экрана';
+        } else if (!canStartSharing) {
+            screenShareBtn.title = `Демонстрация экрана уже ведется пользователем ${state.userNames[state.currentSharingUser] || state.currentSharingUser}`;
+        } else {
+            screenShareBtn.title = 'Начать демонстрацию экрана';
         }
     }
     
@@ -1020,6 +1069,7 @@ async function initApp() {
         // Инициализируем состояние кнопок с начальными значениями
         // Они будут обновлены после получения медиа потока
         updateControlButtons();
+        updateScreenShareButton();
         
         const roomNameEl = document.getElementById('room-name');
         if (roomNameEl) {
@@ -1135,6 +1185,125 @@ async function initApp() {
         }
         
         console.log('[Whiteboard] Event handlers attached');
+    }
+    
+    /**
+     * Перемещает камеры в header при демонстрации экрана
+     */
+    function moveCamerasToHeaderForScreenShare() {
+        const mainContent = document.querySelector('.main-content');
+        const roomHeader = document.querySelector('.room-header');
+        const videoStreams = document.getElementById('video-streams');
+        const screenShareContainer = document.getElementById(`video-${state.uid}`);
+        
+        if (!mainContent || !roomHeader || !videoStreams) {
+            console.warn('[ScreenShare] Cannot move cameras to header - elements not found');
+            return;
+        }
+        
+        // Добавляем класс для режима демонстрации экрана
+        mainContent.classList.add('screen-share-mode');
+        roomHeader.classList.add('screen-share-mode');
+        
+        // Создаем контейнер для камер в header
+        let headerVideoStreams = roomHeader.querySelector('.video-streams');
+        if (!headerVideoStreams) {
+            headerVideoStreams = document.createElement('div');
+            headerVideoStreams.className = 'video-streams';
+            headerVideoStreams.id = 'header-video-streams';
+            roomHeader.appendChild(headerVideoStreams);
+        }
+        
+        // Сначала обновляем класс экрана демонстрации (чтобы он был помечен до перемещения)
+        if (screenShareContainer) {
+            screenShareContainer.classList.add('screen-share');
+        }
+        
+        // Перемещаем все камеры (кроме экрана демонстрации) в header
+        // ВАЖНО: получаем все контейнеры ДО начала перемещения, так как DOM будет изменяться
+        const allVideoContainers = Array.from(videoStreams.querySelectorAll('.video-container'));
+        console.log('[ScreenShare] Found video containers:', allVideoContainers.length);
+        
+        allVideoContainers.forEach(container => {
+            const uid = container.id.replace('video-', '');
+            // НЕ перемещаем экран демонстрации (это экран текущего пользователя с классом screen-share)
+            // Проверяем и по UID, и по классу screen-share для надежности
+            const isScreenShare = (uid === state.uid && state.isScreenSharing && state.currentSharingUser === state.uid) || 
+                                  container.classList.contains('screen-share');
+            
+            if (!isScreenShare) {
+                // Перемещаем все камеры (других пользователей и камеру текущего пользователя, если это не экран демонстрации)
+                console.log('[ScreenShare] Moving camera to header:', uid);
+                container.remove();
+                headerVideoStreams.appendChild(container);
+            } else {
+                console.log('[ScreenShare] Keeping screen share container in main area:', uid);
+            }
+        });
+        
+        // Также проверяем, есть ли еще контейнеры, которые нужно переместить
+        // (на случай, если они были добавлены после начала демонстрации)
+        const remainingContainers = Array.from(videoStreams.querySelectorAll('.video-container'));
+        if (remainingContainers.length > 0) {
+            remainingContainers.forEach(container => {
+                const uid = container.id.replace('video-', '');
+                const isScreenShare = (uid === state.uid && state.isScreenSharing && state.currentSharingUser === state.uid) || 
+                                      container.classList.contains('screen-share');
+                if (!isScreenShare) {
+                    console.log('[ScreenShare] Moving remaining camera to header:', uid);
+                    container.remove();
+                    headerVideoStreams.appendChild(container);
+                }
+            });
+        }
+        
+        console.log('[ScreenShare] Cameras moved to header');
+    }
+    
+    /**
+     * Возвращает камеры обратно в video-section после остановки демонстрации
+     */
+    function returnCamerasFromHeader() {
+        const mainContent = document.querySelector('.main-content');
+        const roomHeader = document.querySelector('.room-header');
+        const videoStreams = document.getElementById('video-streams');
+        const headerVideoStreams = roomHeader?.querySelector('.video-streams');
+        
+        if (!mainContent || !videoStreams) {
+            console.warn('[ScreenShare] Cannot return cameras from header - elements not found');
+            return;
+        }
+        
+        // Удаляем класс режима демонстрации экрана
+        mainContent.classList.remove('screen-share-mode');
+        if (roomHeader) {
+            roomHeader.classList.remove('screen-share-mode');
+        }
+        
+        // Перемещаем камеры обратно в video-section
+        if (headerVideoStreams) {
+            const allVideoContainers = headerVideoStreams.querySelectorAll('.video-container');
+            allVideoContainers.forEach(container => {
+                container.remove();
+                videoStreams.appendChild(container);
+            });
+            
+            // Удаляем контейнер из header
+            headerVideoStreams.remove();
+        }
+        
+        // Удаляем класс screen-share с экрана демонстрации
+        const screenShareContainer = document.getElementById(`video-${state.uid}`);
+        if (screenShareContainer) {
+            screenShareContainer.classList.remove('screen-share');
+        }
+        
+        // Обновляем layout
+        setTimeout(() => {
+            updateVideoLayout();
+        }, 100);
+        
+        console.log('[ScreenShare] Cameras returned from header');
     }
     
     function toggleWhiteboard() {
@@ -1327,6 +1496,10 @@ async function initApp() {
             updateControlButtons();
             
             addVideoStream(state.uid, state.localStream, true);
+            // Обновляем иконку микрофона для локального пользователя после создания элемента
+            setTimeout(() => {
+                updateMicMutedIcon('local', !state.isAudioEnabled);
+            }, 100);
             connectToSignalingServer();
         } catch (error) {
             console.error('Error accessing media devices:', error);
@@ -1399,6 +1572,13 @@ async function initApp() {
                 // Сбрасываем счетчик попыток при успешном подключении
                 state.reconnectAttempts = 0;
                 state.reconnectDelay = 1000;
+                
+                // Запрашиваем текущее состояние демонстрации экрана
+                state.videoSocket.send(JSON.stringify({
+                    type: 'screen-share-request-state',
+                    from: state.uid,
+                    room: state.roomName
+                }));
                 
                 // Отправляем сохраненные результаты TURN тестирования если есть
                 if (turnTestResults) {
@@ -1746,6 +1926,11 @@ async function initApp() {
                     }
                     state.userAudioStates[remoteUidAudioOn] = true;
                     console.log('[Audio] User', remoteUidAudioOn, 'enabled audio');
+                    // Обновляем иконку микрофона
+                    updateMicMutedIcon(remoteUidAudioOn, false);
+                } else if (remoteUidAudioOn === state.uid) {
+                    // Обновляем иконку микрофона для локального пользователя
+                    updateMicMutedIcon('local', false);
                 }
                 break;
             case 'audio-disabled':
@@ -1759,6 +1944,11 @@ async function initApp() {
                     }
                     state.userAudioStates[remoteUidAudioOff] = false;
                     console.log('[Audio] User', remoteUidAudioOff, 'disabled audio');
+                    // Обновляем иконку микрофона
+                    updateMicMutedIcon(remoteUidAudioOff, true);
+                } else if (remoteUidAudioOff === state.uid) {
+                    // Обновляем иконку микрофона для локального пользователя
+                    updateMicMutedIcon('local', true);
                 }
                 break;
             case 'offer':
@@ -2132,6 +2322,36 @@ async function initApp() {
                         }
                     }, 300); // Задержка для обработки всех сообщений
                 }
+                break;
+            case 'screen-share-started':
+                // Демонстрация экрана начата другим пользователем
+                const sharingUser = data.sharing_user || data.from;
+                console.log('[ScreenShare] Screen sharing started by user:', sharingUser);
+                state.currentSharingUser = sharingUser;
+                updateScreenShareButton();
+                break;
+            case 'screen-share-stopped':
+                // Демонстрация экрана остановлена
+                console.log('[ScreenShare] Screen sharing stopped by user:', data.from);
+                state.currentSharingUser = null;
+                updateScreenShareButton();
+                break;
+            case 'screen-share-state':
+                // Получено состояние демонстрации экрана (при подключении)
+                if (data.is_active && data.sharing_user) {
+                    console.log('[ScreenShare] Screen sharing is active, user:', data.sharing_user);
+                    state.currentSharingUser = data.sharing_user;
+                } else {
+                    console.log('[ScreenShare] Screen sharing is not active');
+                    state.currentSharingUser = null;
+                }
+                updateScreenShareButton();
+                break;
+            case 'screen-share-error':
+                // Ошибка при попытке начать демонстрацию экрана
+                console.error('[ScreenShare] Error:', data.message);
+                alert(data.message || 'Не удалось начать демонстрацию экрана');
+                updateScreenShareButton();
                 break;
         }
     }
@@ -3074,6 +3294,14 @@ async function initApp() {
                 
                 addVideoStream(targetUid, remoteStream, false);
                 
+                // Запускаем мониторинг качества связи для удаленного пользователя
+                // Запускаем с небольшой задержкой, чтобы соединение успело установиться
+                setTimeout(() => {
+                    if (state.peerConnections[targetUid]) {
+                        startConnectionQualityMonitoring(targetUid);
+                    }
+                }, 2000);
+                
                 // Показываем лоадер при получении удаленного стрима
                 const videoContainer = document.getElementById(`video-${targetUid}`);
                 if (videoContainer) {
@@ -3245,6 +3473,38 @@ async function initApp() {
             // Обновляем отображение в зависимости от состояния камеры
             // Для удаленных пользователей используем только сохраненное состояние из WebSocket
             updateVideoDisplay(uid, stream);
+            
+            // Обновляем класс для экрана демонстрации
+            const isScreenShare = state.isScreenSharing && state.currentSharingUser === uid;
+            if (videoContainer) {
+                if (isScreenShare) {
+                    videoContainer.classList.add('screen-share');
+                } else {
+                    videoContainer.classList.remove('screen-share');
+                }
+                
+                // Если идет демонстрация экрана, но это не экран демонстрации, перемещаем в header
+                if (state.isScreenSharing && state.currentSharingUser === state.uid && !isScreenShare) {
+                    const mainContent = document.querySelector('.main-content');
+                    const roomHeader = document.querySelector('.room-header');
+                    if (mainContent && mainContent.classList.contains('screen-share-mode') && roomHeader) {
+                        let headerVideoStreams = roomHeader.querySelector('.video-streams');
+                        if (!headerVideoStreams) {
+                            headerVideoStreams = document.createElement('div');
+                            headerVideoStreams.className = 'video-streams';
+                            headerVideoStreams.id = 'header-video-streams';
+                            roomHeader.appendChild(headerVideoStreams);
+                        }
+                        // Проверяем, не находится ли уже в header
+                        if (videoContainer.parentElement !== headerVideoStreams) {
+                            videoContainer.remove();
+                            headerVideoStreams.appendChild(videoContainer);
+                            console.log('[ScreenShare] Moved camera to header during update:', uid);
+                        }
+                    }
+                }
+            }
+            
             return;
         }
         
@@ -3252,7 +3512,9 @@ async function initApp() {
         state.connectedUsers.add(uid);
         
         const videoContainer = document.createElement('div');
-        videoContainer.className = 'video-container';
+        // Определяем, является ли это экраном демонстрации
+        const isScreenShare = state.isScreenSharing && state.currentSharingUser === uid;
+        videoContainer.className = isScreenShare ? 'video-container screen-share' : 'video-container';
         videoContainer.id = `video-${uid}`;
         videoContainer.style.position = 'relative';
         
@@ -3423,6 +3685,52 @@ async function initApp() {
         const displayName = isLocal ? state.userName : (state.userNames[uid] || `User ${uid.substring(0, 6)}`);
         usernameWrapper.textContent = displayName;
         
+        // Создаем контейнер для иконок статуса
+        const statusIconsContainer = document.createElement('div');
+        statusIconsContainer.className = 'video-status-icons';
+        statusIconsContainer.style.position = 'absolute';
+        statusIconsContainer.style.top = '12px';
+        statusIconsContainer.style.right = '12px';
+        statusIconsContainer.style.display = 'flex';
+        statusIconsContainer.style.flexDirection = 'column';
+        statusIconsContainer.style.gap = '8px';
+        statusIconsContainer.style.zIndex = '15';
+        statusIconsContainer.style.pointerEvents = 'none';
+        
+        // Иконка качества связи
+        const connectionQualityIcon = document.createElement('div');
+        const qualityIconId = isLocal ? 'connection-quality-local' : `connection-quality-${uid}`;
+        connectionQualityIcon.id = qualityIconId;
+        connectionQualityIcon.className = 'connection-quality-icon';
+        connectionQualityIcon.style.display = 'none';
+        connectionQualityIcon.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 16H4V12H2V16ZM6 16H8V8H6V16ZM10 16H12V4H10V16ZM14 16H16V2H14V16Z" fill="currentColor"/>
+            </svg>
+        `;
+        statusIconsContainer.appendChild(connectionQualityIcon);
+        
+        // Настраиваем позиционирование tooltip для иконки качества связи
+        setTimeout(() => {
+            setupTooltipPositioning(connectionQualityIcon);
+        }, 100);
+        
+        // Иконка выключенного микрофона
+        const micMutedIcon = document.createElement('div');
+        const micIconId = isLocal ? 'mic-muted-local' : `mic-muted-${uid}`;
+        micMutedIcon.id = micIconId;
+        micMutedIcon.className = 'mic-muted-icon';
+        micMutedIcon.style.display = 'none';
+        micMutedIcon.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="currentColor"/>
+                <path d="M19 10V12C19 15.87 15.87 19 12 19M5 10V12C5 15.87 8.13 19 12 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 19V23M8 23H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        `;
+        statusIconsContainer.appendChild(micMutedIcon);
+        
         // Создаем лоадер для удаленных пользователей ПЕРЕД видео (чтобы был поверх)
         if (!isLocal) {
             // Сбрасываем флаг скрытия для нового пользователя
@@ -3461,6 +3769,7 @@ async function initApp() {
         
         videoContainer.appendChild(video);
         videoContainer.appendChild(usernameWrapper);
+        videoContainer.appendChild(statusIconsContainer);
         
         // Создаем SVG placeholder (будет показан/скрыт в зависимости от состояния камеры)
         const placeholder = document.createElement('div');
@@ -3565,6 +3874,18 @@ async function initApp() {
             // Start audio detection for local stream
             if (isLocal && stream && stream.getAudioTracks().length > 0) {
                 startAudioDetection(uid, stream);
+                // Обновляем иконку микрофона для локального пользователя
+                setTimeout(() => {
+                    updateMicMutedIcon('local', !state.isAudioEnabled);
+                }, 100);
+            }
+            
+            // Обновляем иконку микрофона для удаленных пользователей, если состояние известно
+            if (!isLocal && state.userAudioStates.hasOwnProperty(uid)) {
+                setTimeout(() => {
+                    // state.userAudioStates[uid] === false означает микрофон выключен (muted)
+                    updateMicMutedIcon(uid, state.userAudioStates[uid] === false);
+                }, 100);
             }
         } else {
             console.error('[Video] video-streams element not found!');
@@ -3704,6 +4025,286 @@ async function initApp() {
         }
     }
     
+    // Функции для обновления иконок статуса
+    function updateMicMutedIcon(userId, isMuted) {
+        // Пробуем найти иконку по разным возможным ID
+        const isLocal = (userId === state.uid || userId === 'local');
+        const iconId = isLocal ? 'mic-muted-local' : `mic-muted-${userId}`;
+        let icon = document.getElementById(iconId);
+        
+        // Если не нашли, пробуем найти через контейнер
+        if (!icon) {
+            const containerId = isLocal ? 'video-local' : `video-${userId}`;
+            const container = document.getElementById(containerId);
+            if (container) {
+                icon = container.querySelector(`#${iconId}`);
+            }
+        }
+        
+        // Если все еще не нашли, пробуем через user-container
+        if (!icon) {
+            const containerId = isLocal ? 'user-container-local' : `user-container-${userId}`;
+            const container = document.getElementById(containerId);
+            if (container) {
+                icon = container.querySelector(`#${iconId}`);
+            }
+        }
+        
+        if (icon) {
+            icon.style.display = isMuted ? 'flex' : 'none';
+            console.log(`[Icons] Updated mic icon for ${userId}: ${isMuted ? 'muted' : 'unmuted'}, iconId: ${iconId}, found: ${!!icon}`);
+        } else {
+            console.warn(`[Icons] Mic icon not found for ${userId}, iconId: ${iconId}`);
+        }
+    }
+    
+    function updateConnectionQualityIcon(userId, quality, latency) {
+        // Пробуем найти иконку по разным возможным ID
+        const isLocal = (userId === state.uid || userId === 'local');
+        const iconId = isLocal ? 'connection-quality-local' : `connection-quality-${userId}`;
+        let icon = document.getElementById(iconId);
+        
+        // Если не нашли, пробуем найти через контейнер
+        if (!icon) {
+            const containerId = isLocal ? 'video-local' : `video-${userId}`;
+            const container = document.getElementById(containerId);
+            if (container) {
+                icon = container.querySelector(`#${iconId}`);
+            }
+        }
+        
+        // Если все еще не нашли, пробуем через user-container
+        if (!icon) {
+            const containerId = isLocal ? 'user-container-local' : `user-container-${userId}`;
+            const container = document.getElementById(containerId);
+            if (container) {
+                icon = container.querySelector(`#${iconId}`);
+            }
+        }
+        
+        if (icon) {
+            if (quality === 'excellent' || quality === 'good' || quality === 'fair' || quality === 'poor') {
+                icon.style.display = 'flex';
+                icon.className = `connection-quality-icon quality-${quality}`;
+                // Обновляем SVG в зависимости от качества
+                const svg = icon.querySelector('svg');
+                if (svg) {
+                    svg.innerHTML = getQualityIconSVG(quality);
+                }
+                // Устанавливаем задержку для tooltip
+                let latencyValue = null;
+                if (latency !== undefined && latency !== null && !isNaN(latency)) {
+                    state.connectionLatency[userId] = latency;
+                    latencyValue = Math.round(latency);
+                    icon.setAttribute('data-latency', `${latencyValue} ms`);
+                } else if (state.connectionLatency[userId] !== undefined && state.connectionLatency[userId] !== null && !isNaN(state.connectionLatency[userId])) {
+                    latencyValue = Math.round(state.connectionLatency[userId]);
+                    icon.setAttribute('data-latency', `${latencyValue} ms`);
+                } else {
+                    // Если задержка неизвестна, показываем "N/A"
+                    icon.setAttribute('data-latency', 'N/A');
+                }
+                
+                // Добавляем обработчики для позиционирования tooltip
+                setupTooltipPositioning(icon);
+                
+                console.log(`[Icons] Updated connection quality for ${userId}: ${quality}, latency: ${latencyValue !== null ? latencyValue + 'ms' : (latency || state.connectionLatency[userId] || 'N/A')}, iconId: ${iconId}, data-latency: ${icon.getAttribute('data-latency')}`);
+            } else {
+                icon.style.display = 'none';
+            }
+        } else {
+            console.warn(`[Icons] Connection quality icon not found for ${userId}, iconId: ${iconId}`);
+        }
+    }
+    
+    function setupTooltipPositioning(icon) {
+        if (!icon) {
+            console.warn('[Tooltip] Icon is null, cannot setup tooltip positioning');
+            return;
+        }
+        
+        // Удаляем старые обработчики если есть
+        const oldMouseEnter = icon._tooltipMouseEnter;
+        const oldMouseMove = icon._tooltipMouseMove;
+        const oldMouseLeave = icon._tooltipMouseLeave;
+        
+        if (oldMouseEnter) icon.removeEventListener('mouseenter', oldMouseEnter);
+        if (oldMouseMove) icon.removeEventListener('mousemove', oldMouseMove);
+        if (oldMouseLeave) icon.removeEventListener('mouseleave', oldMouseLeave);
+        
+        // Создаем новые обработчики
+        const updateTooltipPosition = (e) => {
+            try {
+                const rect = icon.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top;
+                icon.style.setProperty('--tooltip-x', `${x}px`);
+                icon.style.setProperty('--tooltip-y', `${y}px`);
+                
+                // Проверяем наличие атрибута data-latency
+                const latency = icon.getAttribute('data-latency');
+                if (!latency) {
+                    console.warn('[Tooltip] No data-latency attribute on icon:', icon.id);
+                }
+            } catch (error) {
+                console.error('[Tooltip] Error updating tooltip position:', error);
+            }
+        };
+        
+        const handleMouseEnter = (e) => {
+            updateTooltipPosition(e);
+            console.log('[Tooltip] Mouse enter on icon:', icon.id, 'data-latency:', icon.getAttribute('data-latency'));
+        };
+        
+        const handleMouseMove = (e) => {
+            updateTooltipPosition(e);
+        };
+        
+        const handleMouseLeave = () => {
+            // Не нужно ничего делать при уходе
+        };
+        
+        // Сохраняем ссылки для возможного удаления
+        icon._tooltipMouseEnter = handleMouseEnter;
+        icon._tooltipMouseMove = handleMouseMove;
+        icon._tooltipMouseLeave = handleMouseLeave;
+        
+        // Добавляем обработчики
+        icon.addEventListener('mouseenter', handleMouseEnter);
+        icon.addEventListener('mousemove', handleMouseMove);
+        icon.addEventListener('mouseleave', handleMouseLeave);
+        
+        console.log('[Tooltip] Setup tooltip positioning for icon:', icon.id);
+    }
+    
+    function getQualityIconSVG(quality) {
+        const colors = {
+            excellent: '#84A98C', // var(--accent-inactive) - светло-зеленый
+            good: '#52796F',      // var(--accent-active) - темно-зеленый
+            fair: '#FFC107',      // желтый
+            poor: '#F44336'       // красный
+        };
+        
+        const color = colors[quality] || colors.fair;
+        
+        // Иконка сигнала с разным количеством полосок в зависимости от качества
+        let bars = '';
+        if (quality === 'excellent') {
+            bars = '<path d="M2 16H4V12H2V16ZM6 16H8V8H6V16ZM10 16H12V4H10V16ZM14 16H16V2H14V16Z" fill="' + color + '"/>';
+        } else if (quality === 'good') {
+            bars = '<path d="M2 16H4V12H2V16ZM6 16H8V8H6V16ZM10 16H12V4H10V16Z" fill="' + color + '"/>';
+        } else if (quality === 'fair') {
+            bars = '<path d="M2 16H4V12H2V16ZM6 16H8V8H6V16Z" fill="' + color + '"/>';
+        } else {
+            bars = '<path d="M2 16H4V12H2V16Z" fill="' + color + '"/>';
+        }
+        
+        return bars;
+    }
+    
+    // Отслеживание качества связи через WebRTC статистику
+    const qualityMonitoringIntervals = {};
+    
+    function startConnectionQualityMonitoring(userId) {
+        // Очищаем предыдущий интервал если есть
+        if (qualityMonitoringIntervals[userId]) {
+            clearInterval(qualityMonitoringIntervals[userId]);
+        }
+        
+        const peerConnection = state.peerConnections[userId];
+        if (!peerConnection) {
+            return;
+        }
+        
+        // Мониторим качество каждые 3 секунды
+        qualityMonitoringIntervals[userId] = setInterval(async () => {
+            try {
+                const stats = await peerConnection.getStats();
+                let quality = 'excellent';
+                
+                // Анализируем статистику для определения качества
+                let packetsLost = 0;
+                let packetsReceived = 0;
+                let jitter = 0;
+                let roundTripTime = 0;
+                
+                stats.forEach(report => {
+                    if (report.type === 'inbound-rtp' && report.mediaType === 'video') {
+                        packetsLost += report.packetsLost || 0;
+                        packetsReceived += report.packetsReceived || 0;
+                        jitter = Math.max(jitter, report.jitter || 0);
+                    }
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        // currentRoundTripTime в секундах, конвертируем в миллисекунды
+                        const rtt = (report.currentRoundTripTime || 0) * 1000;
+                        roundTripTime = Math.max(roundTripTime, rtt);
+                    }
+                });
+                
+                // Если roundTripTime не найден, пробуем найти через remote-inbound-rtp
+                if (roundTripTime === 0) {
+                    stats.forEach(report => {
+                        if (report.type === 'remote-inbound-rtp' && report.mediaType === 'video') {
+                            const rtt = (report.roundTripTime || 0) * 1000;
+                            roundTripTime = Math.max(roundTripTime, rtt);
+                        }
+                    });
+                }
+                
+                // Вычисляем процент потерь пакетов
+                const totalPackets = packetsLost + packetsReceived;
+                const packetLossPercent = totalPackets > 0 ? (packetsLost / totalPackets) * 100 : 0;
+                
+                // Определяем качество на основе метрик
+                if (packetLossPercent > 10 || roundTripTime > 500 || jitter > 50) {
+                    quality = 'poor';
+                } else if (packetLossPercent > 5 || roundTripTime > 300 || jitter > 30) {
+                    quality = 'fair';
+                } else if (packetLossPercent > 2 || roundTripTime > 150 || jitter > 15) {
+                    quality = 'good';
+                } else {
+                    quality = 'excellent';
+                }
+                
+                // Сохраняем задержку (roundTripTime в миллисекундах)
+                state.connectionLatency[userId] = roundTripTime;
+                
+                // Обновляем качество и задержку
+                if (state.connectionQuality[userId] !== quality) {
+                    state.connectionQuality[userId] = quality;
+                    updateConnectionQualityIcon(userId, quality, roundTripTime);
+                    console.log(`[ConnectionQuality] User ${userId}: ${quality} (loss: ${packetLossPercent.toFixed(2)}%, rtt: ${roundTripTime.toFixed(0)}ms, jitter: ${jitter.toFixed(2)}ms)`);
+                } else {
+                    // Обновляем только задержку если качество не изменилось
+                    updateConnectionQualityIcon(userId, quality, roundTripTime);
+                }
+                
+                // Логируем для отладки
+                if (roundTripTime === 0) {
+                    console.warn(`[ConnectionQuality] RTT is 0 for ${userId}, stats available:`, {
+                        hasCandidatePair: Array.from(stats).some(r => r.type === 'candidate-pair'),
+                        hasRemoteInboundRtp: Array.from(stats).some(r => r.type === 'remote-inbound-rtp')
+                    });
+                }
+            } catch (error) {
+                console.error(`[ConnectionQuality] Error monitoring quality for ${userId}:`, error);
+            }
+        }, 3000);
+    }
+    
+    function stopConnectionQualityMonitoring(userId) {
+        if (qualityMonitoringIntervals[userId]) {
+            clearInterval(qualityMonitoringIntervals[userId]);
+            delete qualityMonitoringIntervals[userId];
+        }
+        if (state.connectionQuality[userId]) {
+            delete state.connectionQuality[userId];
+        }
+        if (state.connectionLatency[userId]) {
+            delete state.connectionLatency[userId];
+        }
+    }
+    
     function removeVideoStream(uid) {
         const videoContainer = document.getElementById(`video-${uid}`);
         if (videoContainer) {
@@ -3711,6 +4312,7 @@ async function initApp() {
         }
         
         stopAudioDetection(uid);
+        stopConnectionQualityMonitoring(uid);
         
         // Очищаем интервалы для удаленных треков
         if (state.remoteTrackIntervals && state.remoteTrackIntervals[uid]) {
@@ -4032,15 +4634,114 @@ async function initApp() {
         }
     }
     
-    function toggleMic() {
-        if (state.localStream) {
-            const audioTracks = state.localStream.getAudioTracks();
-            if (audioTracks.length === 0) {
-                console.warn('[Controls] No audio tracks available');
+    async function toggleMic() {
+        // ВАЖНО: кнопка микрофона управляет ТОЛЬКО микрофоном, не звуком демонстрации экрана
+        console.log('[Controls] Toggle microphone. isScreenSharing:', state.isScreenSharing);
+        
+        // Если идет демонстрация экрана, обрабатываем микрофон отдельно от звука экрана
+        if (state.isScreenSharing) {
+            await toggleMicDuringScreenShare();
                 return;
             }
             
-            // Переключаем состояние всех аудио треков
+        // Обычная логика для случая без демонстрации экрана
+        const audioTracks = state.localStream ? state.localStream.getAudioTracks() : [];
+        const newState = audioTracks.length === 0 || !audioTracks[0].enabled;
+        
+        // Если включаем микрофон и трек в состоянии "ended" или его нет, получаем новый поток
+        if (newState && (audioTracks.length === 0 || audioTracks[0].readyState === 'ended')) {
+            try {
+                // Получаем новый поток с аудио (и видео если оно включено)
+                const newStream = await navigator.mediaDevices.getUserMedia({
+                    video: state.isVideoEnabled,
+                    audio: true
+                });
+                
+                // Обновляем локальный стрим
+                if (state.localStream) {
+                    // Удаляем старые аудио треки
+                    const oldAudioTracks = state.localStream.getAudioTracks();
+                    oldAudioTracks.forEach(track => {
+                        state.localStream.removeTrack(track);
+                        track.stop();
+                    });
+                    
+                    // Добавляем новые аудио треки
+                    const newAudioTracks = newStream.getAudioTracks();
+                    newAudioTracks.forEach(track => {
+                        state.localStream.addTrack(track);
+                    });
+                    
+                    // Если видео тоже было запрошено, обновляем видео треки
+                    if (state.isVideoEnabled) {
+                        const oldVideoTracks = state.localStream.getVideoTracks();
+                        const newVideoTracks = newStream.getVideoTracks();
+                        
+                        // Удаляем старые видео треки
+                        oldVideoTracks.forEach(track => {
+                            state.localStream.removeTrack(track);
+                            track.stop();
+                        });
+                        
+                        // Добавляем новые видео треки
+                        newVideoTracks.forEach(track => {
+                            state.localStream.addTrack(track);
+                        });
+                        
+                        // Обновляем все peer connections с новым видео треком
+                        Object.values(state.peerConnections).forEach(pc => {
+                            if (pc.signalingState !== 'closed') {
+                                const senders = pc.getSenders();
+                                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                                if (videoSender && newVideoTracks.length > 0) {
+                                    videoSender.replaceTrack(newVideoTracks[0]).catch(err => {
+                                        console.error('[Controls] Error replacing video track:', err);
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    
+                    // Останавливаем новый поток (треки уже добавлены в state.localStream)
+                    newStream.getTracks().forEach(track => {
+                        if (track.kind === 'audio') {
+                            // Аудио треки уже добавлены, не останавливаем их
+                        } else if (track.kind === 'video' && !state.isVideoEnabled) {
+                            track.stop(); // Останавливаем видео треки если видео выключено
+                        }
+                    });
+                } else {
+                    // Если локального потока нет, используем новый
+                    state.localStream = newStream;
+                }
+                
+                state.isAudioEnabled = true;
+                updateControlButtons();
+                updateVideoDisplay(state.uid, state.localStream);
+                console.log('[Controls] Microphone enabled with new stream');
+                
+                // Обновляем аудио трек во всех peer connections
+                const newAudioTracks = state.localStream.getAudioTracks();
+                if (newAudioTracks.length > 0) {
+                    await replaceAudioTrackInAllConnections(newAudioTracks[0]);
+                }
+                
+                // Отправляем сообщение другим пользователям
+                if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                    state.videoSocket.send(JSON.stringify({
+                        type: 'audio-enabled',
+                        from: state.uid,
+                        room: state.roomName
+                    }));
+                }
+            } catch (error) {
+                console.error('[Controls] Error enabling microphone:', error);
+                state.isAudioEnabled = false;
+                updateControlButtons();
+                alert('Не удалось включить микрофон. Пожалуйста, проверьте разрешения браузера.');
+            }
+        } else if (state.localStream && audioTracks.length > 0) {
+            // Просто переключаем состояние трека
             const newState = !audioTracks[0].enabled;
             audioTracks.forEach(track => {
                 track.enabled = newState;
@@ -4048,6 +4749,15 @@ async function initApp() {
             state.isAudioEnabled = newState;
             updateControlButtons();
             console.log('[Controls] Microphone toggled, enabled:', state.isAudioEnabled);
+            
+            // Обновляем аудио трек во всех peer connections
+            if (newState) {
+                // Если включаем, убеждаемся что трек отправляется
+                const audioTracks = state.localStream.getAudioTracks();
+                if (audioTracks.length > 0) {
+                    await replaceAudioTrackInAllConnections(audioTracks[0]);
+                }
+            }
             
             // Отправляем сообщение другим пользователям о состоянии аудио
             if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
@@ -4058,6 +4768,153 @@ async function initApp() {
                 }));
                 console.log('[Controls] Sent audio state to other users:', state.isAudioEnabled ? 'enabled' : 'disabled');
             }
+        } else {
+            console.warn('[Controls] No local stream or audio tracks available');
+        }
+    }
+    
+    /**
+     * Управление микрофоном во время демонстрации экрана
+     * ВАЖНО: микрофон и звук экрана управляются независимо
+     */
+    async function toggleMicDuringScreenShare() {
+        console.log('[Controls] Toggling microphone during screen share');
+        
+        const newMicState = !state.isAudioEnabled;
+        state.isAudioEnabled = newMicState;
+        
+        // Получаем или находим трек микрофона
+        // Сначала проверяем сохраненный трек микрофона в state
+        let micTrack = state.micTrack;
+        
+        // Если трек микрофона есть, но он в состоянии "ended", сбрасываем его
+        if (micTrack && micTrack.readyState === 'ended') {
+            console.log('[Controls] Microphone track ended, resetting...');
+            micTrack = null;
+            state.micTrack = null;
+        }
+        
+        // Если трека нет в state, ищем в локальном стриме
+        if (!micTrack && state.localStream) {
+            const allAudioTracks = state.localStream.getAudioTracks();
+            micTrack = allAudioTracks.find(track => {
+                return track !== state.screenAudioTrack && 
+                       track !== state.mixedAudioStream?.getAudioTracks()[0] &&
+                       track.readyState === 'live';
+            });
+            // Сохраняем найденный трек в state
+            if (micTrack) {
+                state.micTrack = micTrack;
+                console.log('[Controls] Found and saved microphone track from local stream');
+            }
+        }
+        
+        // Если включаем микрофон и трека нет, получаем новый
+        if (newMicState && !micTrack) {
+            try {
+                console.log('[Controls] Getting new microphone track for screen share...');
+                const micStream = await navigator.mediaDevices.getUserMedia({
+                    video: false,
+                    audio: true
+                });
+                micTrack = micStream.getAudioTracks()[0];
+                micTrack.enabled = true;
+                // Сохраняем трек микрофона в state
+                state.micTrack = micTrack;
+                console.log('[Controls] New microphone track obtained and saved');
+            } catch (error) {
+                console.error('[Controls] Error getting microphone:', error);
+                state.isAudioEnabled = false;
+                state.micTrack = null;
+                updateControlButtons();
+                alert('Не удалось включить микрофон. Пожалуйста, проверьте разрешения браузера.');
+                return;
+            }
+        } else if (!newMicState && micTrack) {
+            // Если выключаем микрофон, НЕ останавливаем трек, только отключаем его
+            // Это нужно для того, чтобы можно было включить его снова без получения нового трека
+            micTrack.enabled = false;
+            console.log('[Controls] Microphone track disabled (not stopped)');
+        }
+        
+        // Создаем или обновляем аудио трек для отправки
+        let audioTrackToSend = null;
+        
+        if (newMicState && micTrack && state.screenAudioTrack) {
+            // Есть и микрофон, и звук экрана - создаем микшированный трек
+            try {
+                console.log('[Controls] Creating mixed audio (microphone + screen audio)');
+                // Убеждаемся, что трек микрофона включен
+                if (!micTrack.enabled) {
+                    micTrack.enabled = true;
+                }
+                audioTrackToSend = await createMixedAudioTrack(micTrack, state.screenAudioTrack);
+            } catch (error) {
+                console.error('[Controls] Error creating mixed audio:', error);
+                // Fallback: используем только микрофон
+                if (micTrack.enabled) {
+                    audioTrackToSend = micTrack;
+                } else {
+                    // Если микрофон выключен, используем только звук экрана
+                    audioTrackToSend = state.screenAudioTrack;
+                }
+            }
+        } else if (newMicState && micTrack) {
+            // Есть только микрофон (нет звука экрана)
+            console.log('[Controls] Using microphone only (no screen audio)');
+            // Убеждаемся, что трек микрофона включен
+            if (!micTrack.enabled) {
+                micTrack.enabled = true;
+            }
+            audioTrackToSend = micTrack;
+        } else if (state.screenAudioTrack) {
+            // Есть только звук экрана (микрофон выключен)
+            console.log('[Controls] Using screen audio only (microphone disabled)');
+            audioTrackToSend = state.screenAudioTrack;
+        } else {
+            console.warn('[Controls] No audio track available for screen share');
+        }
+        
+        // Обновляем локальный стрим
+        if (state.localStream && audioTrackToSend) {
+            // Удаляем старые аудио треки (кроме микрофона, который используется для микширования)
+            const oldAudioTracks = state.localStream.getAudioTracks();
+            oldAudioTracks.forEach(track => {
+                // Не удаляем трек микрофона если он используется для микширования
+                if (track === micTrack && audioTrackToSend !== micTrack && audioTrackToSend !== state.screenAudioTrack) {
+                    // Микрофон используется в микшированном треке, не удаляем его
+                    return;
+                }
+                // Не удаляем трек микрофона, даже если он выключен (для возможности включения позже)
+                if (track === micTrack) {
+                    return;
+                }
+                state.localStream.removeTrack(track);
+                // Не останавливаем трек микрофона если он используется для микширования
+                if (track !== micTrack && track !== audioTrackToSend) {
+                    track.stop();
+                }
+            });
+            
+            // Добавляем новый аудио трек
+            state.localStream.addTrack(audioTrackToSend);
+        }
+        
+        // Обновляем аудио трек во всех peer connections
+        if (audioTrackToSend) {
+            await replaceAudioTrackInAllConnections(audioTrackToSend);
+        }
+        
+        updateControlButtons();
+        console.log('[Controls] Microphone toggled during screen share, enabled:', state.isAudioEnabled);
+        
+        // Отправляем сообщение другим пользователям
+        if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+            state.videoSocket.send(JSON.stringify({
+                type: state.isAudioEnabled ? 'audio-enabled' : 'audio-disabled',
+                from: state.uid,
+                room: state.roomName
+            }));
         }
     }
     
@@ -4177,6 +5034,749 @@ async function initApp() {
         }
     }
     
+    // ============================================================================
+    // Screen Sharing Functions
+    // ============================================================================
+    
+    async function toggleScreenShare() {
+        if (state.isScreenSharing && state.currentSharingUser === state.uid) {
+            // Останавливаем демонстрацию экрана
+            await stopScreenShare();
+        } else {
+            // Начинаем демонстрацию экрана
+            await startScreenShare();
+        }
+    }
+    
+    async function startScreenShare() {
+        // Проверяем, не демонстрирует ли уже кто-то другой
+        if (state.currentSharingUser && state.currentSharingUser !== state.uid) {
+            alert(`Демонстрация экрана уже ведется пользователем ${state.userNames[state.currentSharingUser] || state.currentSharingUser}`);
+            return;
+        }
+        
+        try {
+            console.log('[ScreenShare] Requesting screen share...');
+            
+            // Запрашиваем доступ к экрану
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: {
+                    cursor: 'always',
+                    displaySurface: 'monitor'
+                },
+                audio: true  // Включаем системный звук если доступен
+            });
+            
+            console.log('[ScreenShare] Screen share stream obtained');
+            
+            // Сохраняем стрим и трек
+            state.screenShareStream = screenStream;
+            const videoTracks = screenStream.getVideoTracks();
+            const audioTracks = screenStream.getAudioTracks();
+            
+            console.log('[ScreenShare] Screen stream tracks:', {
+                videoTracks: videoTracks.length,
+                audioTracks: audioTracks.length
+            });
+            
+            if (videoTracks.length === 0) {
+                throw new Error('Не удалось получить видео трек экрана');
+            }
+            
+            state.screenShareTrack = videoTracks[0];
+            
+            // Обработка остановки демонстрации пользователем через браузер
+            state.screenShareTrack.onended = () => {
+                console.log('[ScreenShare] Screen share track ended by user');
+                stopScreenShare();
+            };
+            
+            // Сохраняем аудио трек экрана если есть
+            state.screenAudioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
+            
+            if (state.screenAudioTrack) {
+                console.log('[ScreenShare] ✅ Screen audio track obtained:', {
+                    id: state.screenAudioTrack.id,
+                    enabled: state.screenAudioTrack.enabled,
+                    readyState: state.screenAudioTrack.readyState,
+                    label: state.screenAudioTrack.label
+                });
+                // Убеждаемся, что трек включен
+                if (!state.screenAudioTrack.enabled) {
+                    state.screenAudioTrack.enabled = true;
+                    console.log('[ScreenShare] Enabled screen audio track');
+                }
+            } else {
+                console.warn('[ScreenShare] ⚠️ No screen audio track available. User may not have selected "Share audio" in browser.');
+            }
+            
+            // Получаем или создаем аудио трек микрофона
+            // Сначала проверяем сохраненный трек микрофона в state
+            let micTrack = state.micTrack;
+            
+            // Если трек микрофона есть, но он в состоянии "ended", сбрасываем его
+            if (micTrack && micTrack.readyState === 'ended') {
+                console.log('[ScreenShare] Microphone track ended, resetting...');
+                micTrack = null;
+                state.micTrack = null;
+            }
+            
+            // Если трека нет в state, ищем в локальном стриме
+            if (!micTrack && state.localStream) {
+                const currentAudioTracks = state.localStream.getAudioTracks();
+                console.log('[ScreenShare] Current audio tracks in local stream:', currentAudioTracks.length);
+                
+                // Ищем трек микрофона (не из экрана, и не микшированный)
+                // ВАЖНО: ищем даже если трек выключен (enabled = false), так как его можно включить
+                micTrack = currentAudioTracks.find(track => {
+                    // Проверяем, что это не трек из экрана и не микшированный трек
+                    const isScreenTrack = track === state.screenAudioTrack;
+                    const isMixedTrack = track === state.mixedAudioStream?.getAudioTracks()[0];
+                    const isLive = track.readyState === 'live';
+                    const result = !isScreenTrack && !isMixedTrack && isLive;
+                    
+                    if (result) {
+                        console.log('[ScreenShare] Found potential microphone track:', {
+                            id: track.id,
+                            enabled: track.enabled,
+                            readyState: track.readyState
+                        });
+                    }
+                    
+                    return result;
+                });
+                
+                // Сохраняем найденный трек в state
+                if (micTrack) {
+                    state.micTrack = micTrack;
+                    console.log('[ScreenShare] Found and saved existing microphone track, enabled:', micTrack.enabled);
+                    // Убеждаемся, что трек включен если микрофон должен быть включен
+                    if (state.isAudioEnabled && !micTrack.enabled) {
+                        micTrack.enabled = true;
+                        console.log('[ScreenShare] Enabled microphone track');
+                    }
+                } else {
+                    console.log('[ScreenShare] No microphone track found in local stream');
+                }
+            }
+            
+            // Если микрофон был выключен или трек не найден, но пользователь хочет его использовать
+            // (state.isAudioEnabled = true), получаем новый трек микрофона
+            // ВАЖНО: даже если микрофон был выключен, если state.isAudioEnabled = true, 
+            // значит пользователь хочет его включить, поэтому получаем новый трек
+            if (!micTrack && state.isAudioEnabled) {
+                try {
+                    console.log('[ScreenShare] Microphone track not found or disabled, requesting new microphone stream...');
+                    console.log('[ScreenShare] isAudioEnabled:', state.isAudioEnabled);
+                    const micStream = await navigator.mediaDevices.getUserMedia({
+                        video: false,
+                        audio: true
+                    });
+                    micTrack = micStream.getAudioTracks()[0];
+                    // Включаем трек микрофона
+                    micTrack.enabled = true;
+                    // Сохраняем трек микрофона в state
+                    state.micTrack = micTrack;
+                    console.log('[ScreenShare] New microphone track obtained and saved:', {
+                        id: micTrack.id,
+                        enabled: micTrack.enabled,
+                        readyState: micTrack.readyState
+                    });
+                    
+                    // Если локального стрима нет, создаем его
+                    if (!state.localStream) {
+                        state.localStream = new MediaStream();
+                    }
+                    
+                    // ВАЖНО: НЕ добавляем трек микрофона в локальный стрим сейчас
+                    // Он будет использоваться только для микширования через AudioContext
+                    // В локальный стрим добавим только микшированный трек
+                } catch (error) {
+                    console.error('[ScreenShare] Error getting microphone:', error);
+                    micTrack = null;
+                    state.micTrack = null;
+                    // Если не удалось получить микрофон, продолжаем без него
+                }
+            } else if (!micTrack) {
+                console.log('[ScreenShare] No microphone track available. isAudioEnabled:', state.isAudioEnabled);
+            }
+            
+            // Создаем микшированный аудио стрим (микрофон + звук экрана)
+            // ВАЖНО: используем микрофон только если state.isAudioEnabled === true
+            let mixedAudioTrack = null;
+            console.log('[ScreenShare] Audio mixing decision:', {
+                hasScreenAudio: !!state.screenAudioTrack,
+                hasMicTrack: !!micTrack,
+                isAudioEnabled: state.isAudioEnabled,
+                micTrackEnabled: micTrack ? micTrack.enabled : false
+            });
+            
+            // Используем микрофон только если он включен (state.isAudioEnabled === true)
+            const useMic = state.isAudioEnabled && micTrack;
+            
+            if (state.screenAudioTrack && useMic) {
+                // Есть и звук экрана, и микрофон включен - создаем микшированный трек
+                try {
+                    console.log('[ScreenShare] Creating mixed audio track (microphone + screen audio)...');
+                    // Убеждаемся, что трек микрофона включен
+                    if (!micTrack.enabled) {
+                        micTrack.enabled = true;
+                    }
+                    mixedAudioTrack = await createMixedAudioTrack(micTrack, state.screenAudioTrack);
+                    console.log('[ScreenShare] ✅ Created mixed audio track (microphone + screen audio)');
+                } catch (error) {
+                    console.error('[ScreenShare] ❌ Error creating mixed audio track:', error);
+                    // Если не удалось создать микшированный трек, используем только звук экрана
+                    mixedAudioTrack = state.screenAudioTrack;
+                    console.warn('[ScreenShare] Falling back to screen audio only');
+                }
+            } else if (state.screenAudioTrack) {
+                // Если есть только звук экрана (микрофон выключен или отсутствует)
+                // ВАЖНО: используем звук экрана напрямую, не микшируем
+                mixedAudioTrack = state.screenAudioTrack;
+                console.log('[ScreenShare] ✅ Using screen audio only (microphone disabled or not available)');
+                // Убеждаемся, что трек звука экрана включен
+                if (!state.screenAudioTrack.enabled) {
+                    state.screenAudioTrack.enabled = true;
+                    console.log('[ScreenShare] Enabled screen audio track');
+                }
+            } else if (useMic) {
+                // Если есть только микрофон (нет звука экрана), но микрофон включен
+                if (!micTrack.enabled) {
+                    micTrack.enabled = true;
+                }
+                mixedAudioTrack = micTrack;
+                console.log('[ScreenShare] Using microphone only (no screen audio)');
+            } else {
+                console.warn('[ScreenShare] ⚠️ No audio track available (neither microphone nor screen audio)');
+            }
+            
+            // Сначала обновляем локальный стрим (чтобы трек был доступен для peer connections)
+            if (state.localStream) {
+                // Удаляем старые видео треки
+                const oldVideoTracks = state.localStream.getVideoTracks();
+                oldVideoTracks.forEach(track => {
+                    state.localStream.removeTrack(track);
+                    track.stop();
+                });
+                
+                // Удаляем старые аудио треки
+                const oldAudioTracks = state.localStream.getAudioTracks();
+                oldAudioTracks.forEach(track => {
+                    state.localStream.removeTrack(track);
+                    // НЕ останавливаем трек микрофона если он используется для микширования
+                    // Микрофон будет использоваться в микшированном треке через AudioContext
+                    if (track === micTrack && mixedAudioTrack && mixedAudioTrack !== micTrack) {
+                        // Микрофон используется в микшированном треке, не останавливаем его
+                        // Он будет продолжать работать через AudioContext
+                        console.log('[ScreenShare] Keeping microphone track for mixing (not stopping)');
+                    } else if (track !== mixedAudioTrack) {
+                        // Останавливаем все треки кроме микшированного
+                        // (микрофон уже не в стриме, он используется только для микширования)
+                        track.stop();
+                    }
+                });
+                
+                // Добавляем новый видео трек (экран)
+                state.localStream.addTrack(state.screenShareTrack);
+                
+                // Добавляем микшированный аудио трек (микрофон + звук экрана) или только звук экрана
+                if (mixedAudioTrack) {
+                    state.localStream.addTrack(mixedAudioTrack);
+                    console.log('[ScreenShare] ✅ Added audio track to local stream:', {
+                        isMixed: mixedAudioTrack === state.mixedAudioStream?.getAudioTracks()[0],
+                        isScreenAudio: mixedAudioTrack === state.screenAudioTrack,
+                        enabled: mixedAudioTrack.enabled,
+                        readyState: mixedAudioTrack.readyState
+                    });
+                } else if (state.screenAudioTrack) {
+                    // Если mixedAudioTrack не создан, но есть звук экрана, добавляем его
+                    state.localStream.addTrack(state.screenAudioTrack);
+                    console.log('[ScreenShare] ✅ Added screen audio track directly to local stream');
+                } else {
+                    console.warn('[ScreenShare] ⚠️ No audio track to add to local stream');
+                }
+            } else {
+                // Создаем новый стрим с экраном
+                const tracks = [state.screenShareTrack];
+                if (mixedAudioTrack) {
+                    tracks.push(mixedAudioTrack);
+                } else if (state.screenAudioTrack) {
+                    // Если mixedAudioTrack не создан, но есть звук экрана, добавляем его
+                    tracks.push(state.screenAudioTrack);
+                    console.log('[ScreenShare] ✅ Added screen audio track to new stream');
+                }
+                state.localStream = new MediaStream(tracks);
+                console.log('[ScreenShare] Created new local stream with', tracks.length, 'tracks');
+            }
+            
+            // Теперь заменяем видео и аудио треки во всех peer connections и переинициируем переговоры
+            await replaceVideoTrackInAllConnections(state.screenShareTrack);
+            
+            // Заменяем аудио трек на микшированный (микрофон + звук экрана) или только звук экрана
+            if (mixedAudioTrack) {
+                console.log('[ScreenShare] Replacing audio track with:', {
+                    isMixed: mixedAudioTrack === state.mixedAudioStream?.getAudioTracks()[0],
+                    isScreenAudio: mixedAudioTrack === state.screenAudioTrack,
+                    isMic: mixedAudioTrack === micTrack,
+                    enabled: mixedAudioTrack.enabled,
+                    readyState: mixedAudioTrack.readyState
+                });
+                await replaceAudioTrackInAllConnections(mixedAudioTrack);
+            } else if (state.screenAudioTrack) {
+                // Если mixedAudioTrack не создан, но есть звук экрана, используем его
+                console.log('[ScreenShare] Using screen audio track directly (no mixed track)');
+                await replaceAudioTrackInAllConnections(state.screenAudioTrack);
+            } else {
+                console.warn('[ScreenShare] ⚠️ No audio track to send to peers');
+            }
+            
+            // Обновляем отображение
+            updateVideoDisplay(state.uid, state.localStream);
+            
+            // Отправляем запрос на сервер
+            if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                state.videoSocket.send(JSON.stringify({
+                    type: 'screen-share-start',
+                    from: state.uid,
+                    room: state.roomName
+                }));
+            }
+            
+            state.isScreenSharing = true;
+            state.currentSharingUser = state.uid;
+            updateScreenShareButton();
+            // ВАЖНО: обновляем кнопки управления после начала демонстрации
+            updateControlButtons();
+            
+            // Перемещаем камеры в header и делаем экран демонстрации большим
+            moveCamerasToHeaderForScreenShare();
+            
+            console.log('[ScreenShare] Screen sharing started successfully');
+            
+        } catch (error) {
+            console.error('[ScreenShare] Error starting screen share:', error);
+            
+            if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                alert('Доступ к экрану запрещен. Пожалуйста, разрешите доступ в настройках браузера.');
+            } else if (error.name === 'NotFoundError') {
+                alert('Не удалось найти источник экрана для демонстрации.');
+            } else {
+                alert('Ошибка при начале демонстрации экрана: ' + error.message);
+            }
+            
+            state.isScreenSharing = false;
+            updateScreenShareButton();
+        }
+    }
+    
+    async function stopScreenShare() {
+        if (!state.isScreenSharing) {
+            return;
+        }
+        
+        try {
+            console.log('[ScreenShare] Stopping screen share...');
+            
+            // Останавливаем микшированный аудио стрим
+            if (state.mixedAudioStream) {
+                state.mixedAudioStream.getTracks().forEach(track => track.stop());
+                state.mixedAudioStream = null;
+            }
+            
+            // Закрываем AudioContext если был создан
+            if (state.audioContext && state.audioContext.state !== 'closed') {
+                await state.audioContext.close();
+                state.audioContext = null;
+            }
+            
+            // Останавливаем трек экрана
+            if (state.screenShareTrack) {
+                state.screenShareTrack.stop();
+                state.screenShareTrack = null;
+            }
+            
+            // Останавливаем аудио трек экрана
+            if (state.screenAudioTrack) {
+                state.screenAudioTrack.stop();
+                state.screenAudioTrack = null;
+            }
+            
+            if (state.screenShareStream) {
+                state.screenShareStream.getTracks().forEach(track => track.stop());
+                state.screenShareStream = null;
+            }
+            
+            // ВАЖНО: сохраняем ссылку на трек микрофона ДО удаления треков из стрима
+            // Это нужно для того, чтобы не потерять микрофон при остановке демонстрации
+            let savedMicTrack = null;
+            if (state.localStream) {
+                const allAudioTracks = state.localStream.getAudioTracks();
+                // Ищем трек микрофона (не из экрана, не микшированный)
+                savedMicTrack = allAudioTracks.find(track => {
+                    return track !== state.screenAudioTrack && 
+                           track !== state.mixedAudioStream?.getAudioTracks()[0] &&
+                           track.readyState === 'live';
+                });
+                if (savedMicTrack) {
+                    console.log('[ScreenShare] Found microphone track to preserve:', savedMicTrack.id);
+                }
+            }
+            
+            // Восстанавливаем камеру или создаем новый стрим
+            // Проверяем, нужно ли вообще запрашивать медиа (хотя бы одно должно быть true)
+            if (state.isVideoEnabled || state.isAudioEnabled) {
+                try {
+                    const cameraStream = await navigator.mediaDevices.getUserMedia({
+                        video: state.isVideoEnabled,
+                        audio: state.isAudioEnabled
+                    });
+                    
+                    // Заменяем видео трек во всех peer connections (если есть видео)
+                    if (state.isVideoEnabled) {
+                        const videoTracks = cameraStream.getVideoTracks();
+                        if (videoTracks.length > 0) {
+                            await replaceVideoTrackInAllConnections(videoTracks[0]);
+                        }
+                    }
+                    
+                    // Заменяем аудио трек во всех peer connections (если есть аудио)
+                    // ВАЖНО: восстанавливаем микрофон, который был до демонстрации
+                    if (state.isAudioEnabled) {
+                        const audioTracks = cameraStream.getAudioTracks();
+                        if (audioTracks.length > 0) {
+                            // Используем новый трек микрофона из камеры
+                            await replaceAudioTrackInAllConnections(audioTracks[0]);
+                            console.log('[ScreenShare] Restored microphone track after screen share');
+                        }
+                    } else {
+                        // Если микрофон был выключен, удаляем только микшированный трек и звук экрана
+                        console.log('[ScreenShare] Microphone was disabled, removing screen audio only');
+                        if (state.localStream) {
+                            const oldAudioTracks = state.localStream.getAudioTracks();
+                            oldAudioTracks.forEach(track => {
+                                // Удаляем только микшированный трек и звук экрана
+                                if (track === state.mixedAudioStream?.getAudioTracks()[0] || track === state.screenAudioTrack) {
+                                    state.localStream.removeTrack(track);
+                                    track.stop();
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Обновляем локальный стрим
+                    if (state.localStream) {
+                        // Удаляем старые видео треки (экран)
+                        const oldVideoTracks = state.localStream.getVideoTracks();
+                        oldVideoTracks.forEach(track => {
+                            state.localStream.removeTrack(track);
+                            track.stop();
+                        });
+                        
+                        // Удаляем старые аудио треки (микшированный трек и звук экрана)
+                        const oldAudioTracks = state.localStream.getAudioTracks();
+                        oldAudioTracks.forEach(track => {
+                            // Удаляем только микшированный трек и звук экрана
+                            // НЕ удаляем трек микрофона, если он был сохранен
+                            if (track === state.mixedAudioStream?.getAudioTracks()[0] || 
+                                track === state.screenAudioTrack) {
+                                state.localStream.removeTrack(track);
+                                track.stop();
+                            }
+                        });
+                        
+                        // Добавляем новые треки из камеры
+                        cameraStream.getVideoTracks().forEach(track => {
+                            state.localStream.addTrack(track);
+                        });
+                        if (state.isAudioEnabled) {
+                            cameraStream.getAudioTracks().forEach(track => {
+                                state.localStream.addTrack(track);
+                            });
+                        }
+                    } else {
+                        state.localStream = cameraStream;
+                    }
+                    
+                    updateVideoDisplay(state.uid, state.localStream);
+                    console.log('[ScreenShare] Camera and microphone restored after screen share');
+                    
+                } catch (cameraError) {
+                    console.warn('[ScreenShare] Could not restore camera:', cameraError);
+                    // Продолжаем без камеры/микрофона
+                    if (state.localStream) {
+                        const videoTracks = state.localStream.getVideoTracks();
+                        videoTracks.forEach(track => {
+                            state.localStream.removeTrack(track);
+                            track.stop();
+                        });
+                        // Удаляем микшированный трек и звук экрана, но сохраняем микрофон если был
+                        const oldAudioTracks = state.localStream.getAudioTracks();
+                        oldAudioTracks.forEach(track => {
+                            if (track === state.mixedAudioStream?.getAudioTracks()[0] || 
+                                track === state.screenAudioTrack) {
+                                state.localStream.removeTrack(track);
+                                track.stop();
+                            }
+                        });
+                        updateVideoDisplay(state.uid, state.localStream);
+                    }
+                }
+            } else {
+                // Если и видео и аудио выключены, просто удаляем видео трек экрана и звук экрана
+                console.log('[ScreenShare] Video and audio are disabled, removing screen share track only');
+                if (state.localStream) {
+                    // Удаляем видео трек экрана
+                    const videoTracks = state.localStream.getVideoTracks();
+                    videoTracks.forEach(track => {
+                        state.localStream.removeTrack(track);
+                        track.stop();
+                    });
+                    
+                    // Удаляем только микшированный трек и звук экрана
+                    const oldAudioTracks = state.localStream.getAudioTracks();
+                    oldAudioTracks.forEach(track => {
+                        if (track === state.mixedAudioStream?.getAudioTracks()[0] || 
+                            track === state.screenAudioTrack) {
+                            state.localStream.removeTrack(track);
+                            track.stop();
+                        }
+                    });
+                    
+                    updateVideoDisplay(state.uid, state.localStream);
+                }
+                
+                // Важно: если нет локального стрима или он пуст, создаем минимальный стрим для поддержания соединений
+                // Это нужно для того, чтобы можно было включить микрофон/камеру позже
+                if (!state.localStream || (state.localStream.getTracks().length === 0)) {
+                    state.localStream = new MediaStream();
+                    console.log('[ScreenShare] Created empty local stream for future media');
+                }
+            }
+            
+            // Отправляем запрос на сервер
+            if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                state.videoSocket.send(JSON.stringify({
+                    type: 'screen-share-stop',
+                    from: state.uid,
+                    room: state.roomName
+                }));
+            }
+            
+            state.isScreenSharing = false;
+            state.currentSharingUser = null;
+            updateScreenShareButton();
+            
+            // Возвращаем камеры обратно в video-section
+            returnCamerasFromHeader();
+            
+            console.log('[ScreenShare] Screen sharing stopped successfully');
+            
+        } catch (error) {
+            console.error('[ScreenShare] Error stopping screen share:', error);
+            state.isScreenSharing = false;
+            updateScreenShareButton();
+        }
+    }
+    
+    async function replaceVideoTrackInAllConnections(newTrack) {
+        const replacePromises = [];
+        const needsRenegotiation = new Set();
+        
+        Object.entries(state.peerConnections).forEach(([uid, pc]) => {
+            if (pc.signalingState !== 'closed') {
+                const senders = pc.getSenders();
+                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                
+                if (videoSender) {
+                    replacePromises.push(
+                        videoSender.replaceTrack(newTrack).then(() => {
+                            // После успешной замены трека, нужно переинициировать переговоры
+                            needsRenegotiation.add(uid);
+                        }).catch(err => {
+                            console.error(`[ScreenShare] Error replacing video track for ${uid}:`, err);
+                        })
+                    );
+                } else {
+                    // Если нет видео сендера, добавляем трек
+                    // addTrack не возвращает Promise, поэтому оборачиваем в try-catch
+                    if (state.localStream) {
+                        try {
+                            pc.addTrack(newTrack, state.localStream);
+                            // После добавления трека нужно переинициировать переговоры
+                            needsRenegotiation.add(uid);
+                            // Создаем resolved promise для совместимости с Promise.all
+                            replacePromises.push(Promise.resolve());
+                        } catch (err) {
+                            console.error(`[ScreenShare] Error adding video track for ${uid}:`, err);
+                            replacePromises.push(Promise.resolve()); // Все равно резолвим, чтобы не блокировать другие
+                        }
+                    }
+                }
+            }
+        });
+        
+        await Promise.all(replacePromises);
+        console.log('[ScreenShare] Video track replaced in all connections');
+        
+        // Переинициируем переговоры для всех соединений, где был заменен трек
+        await renegotiateConnections(Array.from(needsRenegotiation));
+    }
+    
+    /**
+     * Создает микшированный аудио трек из микрофона и звука экрана
+     * @param {MediaStreamTrack} micTrack - Трек микрофона
+     * @param {MediaStreamTrack} screenAudioTrack - Трек звука экрана
+     * @returns {MediaStreamTrack} - Микшированный аудио трек
+     */
+    async function createMixedAudioTrack(micTrack, screenAudioTrack) {
+        if (!micTrack && !screenAudioTrack) {
+            throw new Error('No audio sources available');
+        }
+        
+        // Если есть только один источник, возвращаем его
+        if (!micTrack && screenAudioTrack) {
+            return screenAudioTrack;
+        }
+        if (micTrack && !screenAudioTrack) {
+            return micTrack;
+        }
+        
+        // Убеждаемся, что оба трека включены
+        if (micTrack && !micTrack.enabled) {
+            micTrack.enabled = true;
+            console.log('[ScreenShare] Enabled microphone track for mixing');
+        }
+        if (screenAudioTrack && !screenAudioTrack.enabled) {
+            screenAudioTrack.enabled = true;
+            console.log('[ScreenShare] Enabled screen audio track for mixing');
+        }
+        
+        // Закрываем предыдущий AudioContext если есть
+        if (state.audioContext && state.audioContext.state !== 'closed') {
+            try {
+                await state.audioContext.close();
+            } catch (e) {
+                console.warn('[ScreenShare] Error closing previous AudioContext:', e);
+            }
+        }
+        
+        // Создаем AudioContext для микширования
+        state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[ScreenShare] AudioContext created, state:', state.audioContext.state);
+        
+        // Создаем источники для обоих аудио треков
+        const micSource = state.audioContext.createMediaStreamSource(new MediaStream([micTrack]));
+        const screenSource = state.audioContext.createMediaStreamSource(new MediaStream([screenAudioTrack]));
+        
+        // Создаем destination для микшированного потока
+        const destination = state.audioContext.createMediaStreamDestination();
+        
+        // Подключаем оба источника к destination (микширование)
+        micSource.connect(destination);
+        screenSource.connect(destination);
+        
+        // Сохраняем микшированный стрим
+        state.mixedAudioStream = destination.stream;
+        
+        const mixedTrack = destination.stream.getAudioTracks()[0];
+        console.log('[ScreenShare] ✅ Mixed audio created: microphone + screen audio', {
+            mixedTrackId: mixedTrack.id,
+            enabled: mixedTrack.enabled,
+            readyState: mixedTrack.readyState
+        });
+        
+        // Возвращаем микшированный аудио трек
+        return mixedTrack;
+    }
+    
+    async function replaceAudioTrackInAllConnections(newTrack) {
+        const replacePromises = [];
+        const needsRenegotiation = new Set();
+        
+        Object.entries(state.peerConnections).forEach(([uid, pc]) => {
+            if (pc.signalingState !== 'closed') {
+                const senders = pc.getSenders();
+                const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+                
+                if (audioSender) {
+                    replacePromises.push(
+                        audioSender.replaceTrack(newTrack).then(() => {
+                            // После успешной замены трека, нужно переинициировать переговоры
+                            needsRenegotiation.add(uid);
+                        }).catch(err => {
+                            console.error(`[ScreenShare] Error replacing audio track for ${uid}:`, err);
+                        })
+                    );
+                } else {
+                    // Если нет аудио сендера, добавляем трек
+                    if (state.localStream) {
+                        try {
+                            pc.addTrack(newTrack, state.localStream);
+                            // После добавления трека нужно переинициировать переговоры
+                            needsRenegotiation.add(uid);
+                            replacePromises.push(Promise.resolve());
+                        } catch (err) {
+                            console.error(`[ScreenShare] Error adding audio track for ${uid}:`, err);
+                            replacePromises.push(Promise.resolve());
+                        }
+                    }
+                }
+            }
+        });
+        
+        await Promise.all(replacePromises);
+        console.log('[ScreenShare] Audio track replaced in all connections');
+        
+        // Переинициируем переговоры для всех соединений, где был заменен трек
+        await renegotiateConnections(Array.from(needsRenegotiation));
+    }
+    
+    async function renegotiateConnections(uids) {
+        // Переинициируем переговоры для всех соединений, где был заменен трек
+        // Используем Set для дедупликации, если один и тот же uid нуждается в renegotiation
+        const uniqueUids = [...new Set(uids)];
+        
+        for (const uid of uniqueUids) {
+            try {
+                const pc = state.peerConnections[uid];
+                if (pc && pc.signalingState !== 'closed') {
+                    // Проверяем, не идет ли уже переговоры
+                    if (state.negotiationInProgress.has(uid)) {
+                        console.log(`[ScreenShare] Negotiation already in progress for ${uid}, skipping`);
+                        continue;
+                    }
+                    
+                    // Устанавливаем флаг переговоров
+                    state.negotiationInProgress.add(uid);
+                    
+                    // Создаем новый offer для переинициации переговоров
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    
+                    // Отправляем новый offer через WebSocket
+                    if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                        state.videoSocket.send(JSON.stringify({
+                            type: 'offer',
+                            offer: offer,
+                            from: state.uid,
+                            to: uid
+                        }));
+                        console.log(`[ScreenShare] Sent renegotiation offer to ${uid}`);
+                    }
+                    
+                    // Снимаем флаг переговоров через небольшую задержку
+                    setTimeout(() => {
+                        state.negotiationInProgress.delete(uid);
+                    }, 5000);
+                }
+            } catch (err) {
+                console.error(`[ScreenShare] Error renegotiating with ${uid}:`, err);
+                state.negotiationInProgress.delete(uid);
+            }
+        }
+    }
+    
     function leaveRoom() {
         console.log('[Leave] User leaving room, UID:', state.uid);
         
@@ -4208,13 +5808,13 @@ async function initApp() {
                     if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
                         // Проверяем буфер отправки (если доступно)
                         if (state.videoSocket.bufferedAmount === 0) {
-                            closeConnections();
+                            closeConnections().catch(err => console.error('[Leave] Error closing connections:', err));
                         } else {
                             // Если буфер не пуст, ждем еще немного
                             setTimeout(checkBufferAndClose, 50);
                         }
                     } else {
-                        closeConnections();
+                        closeConnections().catch(err => console.error('[Leave] Error closing connections:', err));
                     }
                 };
                 
@@ -4222,13 +5822,18 @@ async function initApp() {
                 setTimeout(checkBufferAndClose, 50);
             } catch (error) {
                 console.error('[Leave] Error sending user-left message:', error);
-                closeConnections();
+                closeConnections().catch(err => console.error('[Leave] Error closing connections:', err));
             }
         } else {
-            closeConnections();
+            closeConnections().catch(err => console.error('[Leave] Error closing connections:', err));
         }
         
-        function closeConnections() {
+        async function closeConnections() {
+        // Останавливаем демонстрацию экрана если активна
+        if (state.isScreenSharing) {
+            await stopScreenShare();
+        }
+        
         if (state.localStream) {
             state.localStream.getTracks().forEach(track => track.stop());
         }
@@ -4326,6 +5931,14 @@ async function initApp() {
             cameraBtn.addEventListener('click', toggleCamera);
         } else {
             console.error('[Events] Camera button NOT FOUND!');
+        }
+        
+        const screenShareBtn = document.getElementById('toggle-screen-share-btn');
+        if (screenShareBtn) {
+            console.log('[Events] Screen share button found, attaching listener');
+            screenShareBtn.addEventListener('click', toggleScreenShare);
+        } else {
+            console.error('[Events] Screen share button NOT FOUND!');
         }
         
         const leaveBtn = document.getElementById('leave-room-btn');

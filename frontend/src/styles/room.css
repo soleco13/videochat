@@ -212,6 +212,109 @@
   display: none;
 }
 
+/* Режим демонстрации экрана - камеры в header, экран занимает всю площадь */
+.main-content.screen-share-mode .video-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* Учитываем высоту header и controls-wrapper */
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.main-content.screen-share-mode .video-streams {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  padding-top: 100px; /* Отступ сверху для header */
+  padding-bottom: 100px; /* Отступ снизу для controls-wrapper */
+  overflow: hidden;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* Экран демонстрации - прямоугольный, большой */
+.video-container.screen-share {
+  aspect-ratio: 16 / 9 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  /* Вычитаем высоту header (100px) и controls-wrapper (100px) */
+  max-height: calc(100vh - 200px) !important;
+  min-width: 800px !important;
+  min-height: 450px !important;
+  flex: 0 0 auto !important;
+  box-sizing: border-box;
+}
+
+.video-container.screen-share video {
+  object-fit: contain !important;
+}
+
+/* Камеры участников остаются квадратными - стили применяются через базовые классы */
+
+/* При демонстрации экрана камеры перемещаются в header */
+.main-content.screen-share-mode .room-header {
+  background: var(--bg-secondary) !important;
+  box-shadow: var(--shadow-md) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  padding: 6px 12px !important;
+  min-height: 80px !important;
+  max-height: 100px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+.main-content.screen-share-mode .room-header .header-content {
+  display: none !important;
+}
+
+.main-content.screen-share-mode .room-header .video-streams {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 8px !important;
+  padding: 0 !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  flex: 0 0 auto !important;
+  padding-bottom: 0 !important;
+}
+
+.main-content.screen-share-mode .room-header .video-container:not(.screen-share) {
+  flex: 0 0 auto !important;
+  width: 120px !important;
+  height: 68px !important;
+  min-width: 120px !important;
+  max-width: 120px !important;
+  border-radius: 6px !important;
+  overflow: hidden !important;
+  box-shadow: var(--shadow-sm) !important;
+  aspect-ratio: 1 / 1 !important;
+}
+
+.main-content.screen-share-mode .room-header .video-container:not(.screen-share) video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+.main-content.screen-share-mode .room-header .username-wrapper {
+  font-size: 9px !important;
+  padding: 2px 4px !important;
+  bottom: 2px !important;
+  left: 2px !important;
+  right: 2px !important;
+  line-height: 1.2 !important;
+}
+
 /* Панель управления должна быть видна поверх доски */
 .controls-wrapper {
   z-index: 2002;
@@ -357,9 +460,7 @@ body > .controls-wrapper {
   }
 }
 
-.video-section.chat-open {
-  /* Ширина не меняется, чат просто накладывается поверх */
-}
+/* .video-section.chat-open - ширина не меняется, чат просто накладывается поверх */
 
 .video-streams {
   display: flex;
@@ -470,6 +571,209 @@ body > .controls-wrapper {
   font-weight: 600;
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border-color);
+}
+
+/* Иконки статуса видео */
+.video-status-icons {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.connection-quality-icon,
+.mic-muted-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-secondary);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: var(--shadow-md);
+  transition: all 0.2s ease;
+  pointer-events: auto;
+  position: relative;
+}
+
+.connection-quality-icon:hover,
+.mic-muted-icon:hover {
+  background: var(--hover-bg);
+  border-color: var(--border-active);
+  box-shadow: var(--shadow-lg);
+  transform: scale(1.05);
+}
+
+.connection-quality-icon svg,
+.mic-muted-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mic-muted-icon {
+  color: #F44336;
+  background: rgba(244, 67, 54, 0.15);
+  border-color: rgba(244, 67, 54, 0.4);
+}
+
+.mic-muted-icon:hover {
+  background: rgba(244, 67, 54, 0.25);
+  border-color: rgba(244, 67, 54, 0.6);
+}
+
+.connection-quality-icon.quality-excellent {
+  color: var(--accent-inactive);
+  background: rgba(132, 169, 140, 0.15);
+  border-color: rgba(132, 169, 140, 0.4);
+}
+
+.connection-quality-icon.quality-excellent:hover {
+  background: rgba(132, 169, 140, 0.25);
+  border-color: rgba(132, 169, 140, 0.6);
+}
+
+.connection-quality-icon.quality-good {
+  color: var(--accent-active);
+  background: rgba(82, 121, 111, 0.15);
+  border-color: rgba(82, 121, 111, 0.4);
+}
+
+.connection-quality-icon.quality-good:hover {
+  background: rgba(82, 121, 111, 0.25);
+  border-color: rgba(82, 121, 111, 0.6);
+}
+
+.connection-quality-icon.quality-fair {
+  color: #FFC107;
+  background: rgba(255, 193, 7, 0.15);
+  border-color: rgba(255, 193, 7, 0.4);
+}
+
+.connection-quality-icon.quality-fair:hover {
+  background: rgba(255, 193, 7, 0.25);
+  border-color: rgba(255, 193, 7, 0.6);
+}
+
+.connection-quality-icon.quality-poor {
+  color: #F44336;
+  background: rgba(244, 67, 54, 0.15);
+  border-color: rgba(244, 67, 54, 0.4);
+}
+
+.connection-quality-icon.quality-poor:hover {
+  background: rgba(244, 67, 54, 0.25);
+  border-color: rgba(244, 67, 54, 0.6);
+}
+
+/* Tooltip для иконки качества связи */
+.connection-quality-icon {
+  --tooltip-x: 0px;
+  --tooltip-y: 0px;
+}
+
+.connection-quality-icon::after {
+  content: attr(data-latency);
+  position: fixed;
+  bottom: auto;
+  top: calc(var(--tooltip-y, 0px) - 40px);
+  left: var(--tooltip-x, 0px);
+  transform: translateX(-50%) translateY(-4px);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  z-index: 10000;
+  min-width: 50px;
+  text-align: center;
+}
+
+/* Показываем tooltip только если есть data-latency */
+.connection-quality-icon:not([data-latency=""])::after {
+  display: block;
+}
+
+.connection-quality-icon:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.connection-quality-icon::before {
+  content: '';
+  position: fixed;
+  bottom: auto;
+  top: calc(var(--tooltip-y, 0px) - 34px);
+  left: var(--tooltip-x, 0px);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--bg-secondary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 10001;
+}
+
+.connection-quality-icon:hover::before {
+  opacity: 1;
+}
+
+/* Адаптивность для иконок */
+@media screen and (max-width: 768px) {
+  .video-status-icons {
+    top: 8px;
+    right: 8px;
+    gap: 6px;
+  }
+  
+  .connection-quality-icon,
+  .mic-muted-icon {
+    width: 28px;
+    height: 28px;
+    padding: 5px;
+  }
+  
+  .connection-quality-icon::after {
+    font-size: 11px;
+    padding: 5px 8px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .video-status-icons {
+    top: 6px;
+    right: 6px;
+    gap: 4px;
+  }
+  
+  .connection-quality-icon,
+  .mic-muted-icon {
+    width: 24px;
+    height: 24px;
+    padding: 4px;
+  }
+  
+  .connection-quality-icon::after {
+    font-size: 10px;
+    padding: 4px 6px;
+  }
 }
 
 /* Лоадер для загрузки видео */
