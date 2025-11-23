@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, Http404
 import random
 from .models import RoomMember, Room
 import json
@@ -41,9 +41,13 @@ def join_room(request, room_id):
             "room_name": room_obj.name,
             "room_id": str(room_obj.id)
         })
-    except:
+    except Http404:
         return render(request, 'base/join_room.html', {
             "error": "Room not found or inactive"
+        })
+    except (ValueError, TypeError) as e:
+        return render(request, 'base/join_room.html', {
+            "error": "Invalid room ID format"
         })
 
 
@@ -56,28 +60,38 @@ def getToken(request):
 
 @csrf_exempt
 def createMember(request):
-    data = json.loads(request.body)
-    room_name = data['room_name']
-    
-    # Get or create room
-    room_obj, _ = Room.objects.get_or_create(
-        name=room_name.upper(),
-        defaults={'created_at': timezone.now()}
-    )
-    
-    member, created = RoomMember.objects.get_or_create(
-        name=data['name'],
-        uid=data['UID'],
-        room_name=room_name,
-        defaults={'room': room_obj}
-    )
-    
-    # Update room reference if member already existed
-    if not created and not member.room:
-        member.room = room_obj
-        member.save()
+    try:
+        data = json.loads(request.body)
+        room_name = data.get('room_name')
+        name = data.get('name')
+        uid = data.get('UID')
+        
+        if not room_name or not name or not uid:
+            return JsonResponse({'error': 'Missing required fields: room_name, name, or UID'}, status=400, safe=False)
+        
+        # Get or create room
+        room_obj, _ = Room.objects.get_or_create(
+            name=room_name.upper(),
+            defaults={'created_at': timezone.now()}
+        )
+        
+        member, created = RoomMember.objects.get_or_create(
+            name=name,
+            uid=uid,
+            room_name=room_name,
+            defaults={'room': room_obj}
+        )
+        
+        # Update room reference if member already existed
+        if not created and not member.room:
+            member.room = room_obj
+            member.save()
 
-    return JsonResponse({'name': data['name']}, safe=False)
+        return JsonResponse({'name': name}, safe=False)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500, safe=False)
 
 
 def getMember(request):
@@ -95,17 +109,29 @@ def getMember(request):
 
 @csrf_exempt
 def deleteMember(request):
-    data = json.loads(request.body)
     try:
-        member = RoomMember.objects.get(
-            name=data['name'],
-            uid=data['UID'],
-            room_name=data['room_name']
-        )
-        member.delete()
-        return JsonResponse('Member deleted', safe=False)
-    except RoomMember.DoesNotExist:
-        return JsonResponse('Member not found', safe=False, status=404)
+        data = json.loads(request.body)
+        name = data.get('name')
+        uid = data.get('UID')
+        room_name = data.get('room_name')
+        
+        if not name or not uid or not room_name:
+            return JsonResponse({'error': 'Missing required fields: name, UID, or room_name'}, status=400, safe=False)
+        
+        try:
+            member = RoomMember.objects.get(
+                name=name,
+                uid=uid,
+                room_name=room_name
+            )
+            member.delete()
+            return JsonResponse('Member deleted', safe=False)
+        except RoomMember.DoesNotExist:
+            return JsonResponse('Member not found', safe=False, status=404)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500, safe=False)
 
 def getRoomMembers(request):
     room_name = request.GET.get('room_name')

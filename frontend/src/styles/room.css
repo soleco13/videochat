@@ -15,7 +15,7 @@
 }
 
 /* Для планшета и мобильных - разрешаем прокрутку */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .room-container {
     position: relative !important;
     height: auto !important;
@@ -200,7 +200,7 @@
 }
 
 /* Для планшета - разрешаем прокрутку */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .main-content {
     overflow: visible !important;
     min-height: auto !important;
@@ -322,7 +322,7 @@
 }
 
 /* Для планшета - гарантируем видимость панели */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .controls-wrapper {
     display: flex !important;
     visibility: visible !important;
@@ -453,7 +453,7 @@ body > .controls-wrapper {
 }
 
 /* Для планшета - гарантируем видимость */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .video-section {
     overflow: visible !important;
     min-height: auto !important;
@@ -474,6 +474,428 @@ body > .controls-wrapper {
   justify-content: center;
   align-items: center;
   min-height: 0;
+}
+
+/* ============================================================================
+   Адаптивный Grid Layout System
+   ============================================================================ */
+
+/* Базовые стили для адаптивной сетки */
+.video-streams.adaptive-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 1), var(--video-size, 200px));
+  grid-template-rows: repeat(var(--grid-rows, 1), var(--video-size, 200px));
+  gap: var(--grid-gap, 10px);
+  padding: 20px;
+  padding-bottom: 100px;
+  justify-content: center;
+  align-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+/* Scrollable режим для мобильных устройств */
+.video-streams.adaptive-grid.scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Адаптивные размеры для разных устройств */
+.video-streams.adaptive-grid .video-container {
+  width: var(--video-size, 200px);
+  height: var(--video-size, 200px);
+  min-width: var(--video-size, 200px);
+  min-height: var(--video-size, 200px);
+  max-width: var(--video-size, 200px);
+  max-height: var(--video-size, 200px);
+  flex: 0 0 var(--video-size, 200px);
+  aspect-ratio: 1 / 1;
+}
+
+/* Desktop: автоматическая сетка */
+@media (min-width: 1025px) {
+  .video-streams.adaptive-grid {
+    padding: 20px;
+  }
+  
+  .video-streams.adaptive-grid.cols-1 {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  
+  .video-streams.adaptive-grid.cols-2 {
+    grid-template-columns: repeat(2, var(--video-size, 200px));
+  }
+  
+  .video-streams.adaptive-grid.cols-3 {
+    grid-template-columns: repeat(3, var(--video-size, 200px));
+  }
+  
+  .video-streams.adaptive-grid.cols-4 {
+    grid-template-columns: repeat(4, var(--video-size, 200px));
+  }
+}
+
+/* Tablet стили */
+@media (min-width: 481px) and (max-width: 1366px) {
+  .video-streams.adaptive-grid {
+    padding: 16px;
+    padding-bottom: 100px;
+    gap: var(--grid-gap, 8px);
+  }
+  
+  /* Портретная ориентация: максимум 2 колонки */
+  @media (orientation: portrait) {
+    .video-streams.adaptive-grid {
+      grid-template-columns: repeat(min(2, var(--grid-cols, 1)), var(--video-size, 180px));
+    }
+  }
+  
+  /* Ландшафтная ориентация: 3-4 колонки */
+  @media (orientation: landscape) {
+    .video-streams.adaptive-grid {
+      grid-template-columns: repeat(min(4, var(--grid-cols, 1)), var(--video-size, 180px));
+    }
+  }
+}
+
+/* Phone стили */
+@media (max-width: 480px) {
+  .video-streams.adaptive-grid {
+    padding: 12px;
+    padding-bottom: 100px;
+    gap: var(--grid-gap, 6px);
+  }
+  
+  /* Портретная ориентация: вертикальный список или 1-2 колонки */
+  @media (orientation: portrait) {
+    .video-streams.adaptive-grid {
+      grid-template-columns: repeat(min(2, var(--grid-cols, 1)), var(--video-size, 120px));
+      justify-content: center;
+    }
+    
+    .video-streams.adaptive-grid.scrollable {
+      max-height: calc(100vh - 200px);
+    }
+  }
+  
+  /* Ландшафтная ориентация: 2-3 колонки */
+  @media (orientation: landscape) {
+    .video-streams.adaptive-grid {
+      grid-template-columns: repeat(min(3, var(--grid-cols, 1)), var(--video-size, 120px));
+      padding-bottom: 80px;
+    }
+  }
+}
+
+/* ============================================================================
+   Screen Sharing Mode Layout
+   ============================================================================ */
+
+.video-streams.screen-share-mode {
+  display: flex;
+  flex-direction: row;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Desktop: экран слева, участники справа */
+.video-streams.screen-share-mode.participants-vertical {
+  flex-direction: row;
+}
+
+.video-streams.screen-share-mode.participants-vertical .screen-share-container {
+  width: var(--screen-share-width, calc(100% - 220px));
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  position: relative;
+}
+
+.video-streams.screen-share-mode.participants-vertical .screen-share-container .video-container.screen-share-video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  aspect-ratio: auto !important;
+  flex: 1 1 auto !important;
+}
+
+.video-streams.screen-share-mode.participants-vertical .screen-share-container .video-container.screen-share-video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  aspect-ratio: auto !important;
+  flex: 1 1 auto !important;
+}
+
+.video-streams.screen-share-mode.participants-vertical .screen-share-container video,
+.video-streams.screen-share-mode.participants-vertical .screen-share-container canvas {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  aspect-ratio: auto;
+}
+
+.video-streams.screen-share-mode.participants-vertical .participants-panel {
+  width: var(--participants-panel-width, 200px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--participants-gap, 8px);
+  padding: 12px;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-color);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.video-streams.screen-share-mode.participants-vertical .participants-panel .video-container {
+  width: 100%;
+  height: var(--participants-video-size, 180px);
+  min-width: 0;
+  min-height: var(--participants-video-size, 180px);
+  max-width: 100%;
+  max-height: var(--participants-video-size, 180px);
+  flex: 0 0 var(--participants-video-size, 180px);
+  aspect-ratio: 1 / 1;
+}
+
+/* Tablet/Phone: экран сверху, участники снизу */
+.video-streams.screen-share-mode.participants-horizontal {
+  flex-direction: column;
+  display: flex !important;
+}
+
+.video-streams.screen-share-mode.participants-horizontal .screen-share-container {
+  width: 100% !important;
+  height: var(--screen-share-height, calc(100% - 200px)) !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  position: relative;
+  flex-shrink: 0;
+  min-height: 200px;
+}
+
+.video-streams.screen-share-mode.participants-horizontal .screen-share-container .video-container.screen-share-video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  aspect-ratio: auto !important;
+  flex: 1 1 auto !important;
+}
+
+.video-streams.screen-share-mode.participants-horizontal .screen-share-container video,
+.video-streams.screen-share-mode.participants-horizontal .screen-share-container canvas {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  aspect-ratio: auto;
+}
+
+.video-streams.screen-share-mode.participants-horizontal .participants-panel {
+  width: 100%;
+  height: var(--participants-panel-height, 180px);
+  display: flex;
+  flex-direction: row;
+  gap: var(--participants-gap, 8px);
+  padding: 12px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.video-streams.screen-share-mode.participants-horizontal .participants-panel .video-container {
+  width: var(--participants-video-size, 160px);
+  height: 100%;
+  min-width: var(--participants-video-size, 160px);
+  min-height: 0;
+  max-width: var(--participants-video-size, 160px);
+  max-height: 100%;
+  flex: 0 0 var(--participants-video-size, 160px);
+  aspect-ratio: 1 / 1;
+}
+
+/* Scrollable панель участников */
+.video-streams.screen-share-mode .participants-panel.participants-scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.video-streams.screen-share-mode .participants-panel.participants-scrollable::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.video-streams.screen-share-mode .participants-panel.participants-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.video-streams.screen-share-mode .participants-panel.participants-scrollable::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.video-streams.screen-share-mode .participants-panel.participants-scrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--border-active);
+}
+
+/* Адаптация для мобильных устройств (планшеты и телефоны) */
+@media (max-width: 1366px) {
+  .video-streams.screen-share-mode {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .video-streams.screen-share-mode.participants-vertical {
+    flex-direction: column !important;
+  }
+  
+  .video-streams.screen-share-mode.participants-horizontal {
+    flex-direction: column !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container {
+    width: 100% !important;
+    height: var(--screen-share-height, calc(100% - 200px)) !important;
+    display: flex !important;
+    flex-shrink: 0 !important;
+    min-height: 200px !important;
+    order: 1 !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container .video-container.screen-share-video {
+    width: 100% !important;
+    height: 100% !important;
+    aspect-ratio: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container video,
+  .video-streams.screen-share-mode .screen-share-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+    aspect-ratio: auto !important;
+    object-fit: contain !important;
+  }
+  
+  .video-streams.screen-share-mode .participants-panel {
+    width: 100% !important;
+    height: var(--participants-panel-height, 180px) !important;
+    padding: 8px !important;
+    flex-direction: row !important;
+    order: 2 !important;
+    flex-shrink: 0 !important;
+    border-left: none !important;
+    border-top: 1px solid var(--border-color) !important;
+    display: flex !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+  
+  .video-streams.screen-share-mode .participants-panel .video-container {
+    width: var(--participants-video-size, 160px) !important;
+    height: var(--participants-video-size, 160px) !important;
+    min-width: var(--participants-video-size, 160px) !important;
+    min-height: var(--participants-video-size, 160px) !important;
+    flex: 0 0 var(--participants-video-size, 160px) !important;
+    aspect-ratio: 1 / 1 !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Phone: экран сверху, участники снизу */
+  .video-streams.screen-share-mode {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .video-streams.screen-share-mode.participants-horizontal {
+    flex-direction: column !important;
+    display: flex !important;
+  }
+  
+  .video-streams.screen-share-mode.participants-vertical {
+    flex-direction: column !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container {
+    width: 100% !important;
+    height: var(--screen-share-height, calc(100vh - 300px)) !important;
+    display: flex !important;
+    flex-shrink: 0 !important;
+    min-height: 250px !important;
+    max-height: calc(100vh - 300px) !important;
+    order: 1 !important;
+    position: relative !important;
+    background: var(--bg-secondary) !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container .video-container.screen-share-video {
+    width: 100% !important;
+    height: 100% !important;
+    aspect-ratio: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    position: relative !important;
+  }
+  
+  .video-streams.screen-share-mode .screen-share-container video,
+  .video-streams.screen-share-mode .screen-share-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+    aspect-ratio: auto !important;
+    object-fit: contain !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+  }
+  
+  .video-streams.screen-share-mode .participants-panel {
+    width: 100% !important;
+    height: var(--participants-panel-height, 140px) !important;
+    padding: 8px !important;
+    flex-direction: row !important;
+    order: 2 !important;
+    flex-shrink: 0 !important;
+    display: flex !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  
+  .video-streams.screen-share-mode .participants-panel .video-container {
+    width: var(--participants-video-size, 120px) !important;
+    height: var(--participants-video-size, 120px) !important;
+    min-width: var(--participants-video-size, 120px) !important;
+    min-height: var(--participants-video-size, 120px) !important;
+    flex: 0 0 var(--participants-video-size, 120px) !important;
+    aspect-ratio: 1 / 1 !important;
+  }
 }
 
 /* Базовые стили для видео контейнеров */
@@ -848,7 +1270,7 @@ body > .controls-wrapper {
 }
 
 /* Адаптивность лоадера для разных размеров контейнеров */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .video-loader .pl {
     width: 40px !important;
     height: 40px !important;
@@ -929,7 +1351,7 @@ body > .controls-wrapper {
 }
 
 /* На планшетах и телефонах панель управления всегда должна быть видна */
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   .controls-wrapper {
     position: fixed !important;
     bottom: env(safe-area-inset-bottom, 0) !important;
@@ -937,6 +1359,7 @@ body > .controls-wrapper {
     right: 0 !important;
     width: 100% !important;
     background: transparent !important;
+    backdrop-filter: none !important;
     border-top: none !important;
     box-shadow: none !important;
     z-index: 2005 !important;
@@ -947,7 +1370,7 @@ body > .controls-wrapper {
 }
 
 /* Горизонтальный режим планшета - полная перестройка для видимости панели */
-@media screen and (max-width: 1024px) and (orientation: landscape) {
+@media screen and (min-width: 481px) and (max-width: 1366px) and (orientation: landscape) {
   html, body {
     overflow-y: auto !important;
     overflow-x: hidden !important;
@@ -1011,10 +1434,10 @@ body > .controls-wrapper {
     gap: 10px !important;
     min-height: 70px !important;
     height: auto !important;
-    background: rgba(0, 0, 0, 0.7) !important;
-    backdrop-filter: blur(10px) !important;
-    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3) !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    border-top: none !important;
+    box-shadow: none !important;
   }
   
   /* Оптимизируем область для видео - убираем лишние отступы */
@@ -1277,7 +1700,7 @@ body > .controls-wrapper {
   }
 }
 
-@media screen and (max-width: 1024px) {
+@media screen and (max-width: 1366px) {
   html, body {
     overflow: auto !important;
     height: auto !important;
@@ -1293,6 +1716,7 @@ body > .controls-wrapper {
     position: relative !important;
     display: flex !important;
     flex-direction: column !important;
+    padding-bottom: 100px !important; /* Место для панели управления */
   }
   
   .video-section {
@@ -1354,27 +1778,26 @@ body > .controls-wrapper {
     gap: 14px !important;
     min-height: 75px !important;
     height: auto !important;
-    position: sticky !important;
+    position: fixed !important;
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
     width: 100% !important;
     background: transparent !important;
+    backdrop-filter: none !important;
     border-top: none !important;
     box-shadow: none !important;
     z-index: 2005 !important;
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
-    margin-top: auto !important;
   }
   
   /* Горизонтальный режим планшета (внутри основного медиа-запроса) */
   @media screen and (orientation: landscape) {
     .controls-wrapper {
+      position: fixed !important;
       bottom: 0 !important;
-      position: sticky !important;
-      margin-top: auto !important;
     }
   }
   

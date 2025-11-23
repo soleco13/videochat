@@ -11,6 +11,8 @@ export default defineConfig({
     outDir: resolve(__dirname, '../staticfiles'),
     emptyOutDir: false,
     manifest: true,
+    // Ensure CSS from Vue components is included
+    cssCodeSplit: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/index.html'),
@@ -27,6 +29,7 @@ export default defineConfig({
         assetFileNames: (assetInfo) => {
           if (assetInfo.name && assetInfo.name.endsWith('.css')) {
             // Keep original CSS file names for Django static files
+            // Vue component styles (including Lobby.vue) will be extracted automatically
             return 'styles/[name][extname]'
           }
           return 'assets/[name]-[hash][extname]'

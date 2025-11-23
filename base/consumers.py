@@ -17,8 +17,10 @@ from base.screen_sharing_handlers import ScreenSharingHandlers
 MAX_ROOM_SIZE = int(os.environ.get('MAX_ROOM_SIZE', '20'))
 
 # Rate limiting: максимум сообщений в секунду
-# Увеличено для WebRTC (много ICE кандидатов приходят быстро)
-MAX_MESSAGES_PER_SECOND = 30  # Было 10 - недостаточно для WebRTC
+# Увеличено для поддержки 10 пользователей (много ICE кандидатов приходят быстро)
+# При 10 пользователях: ~10-15 ICE кандидатов на соединение * 10 соединений = 100-150 сообщений
+# Плюс обычные сообщения (offer, answer, whiteboard и т.д.)
+MAX_MESSAGES_PER_SECOND = 200  # Увеличено для поддержки 10 пользователей
 RATE_LIMIT_WINDOW = 1.0  # секунды
 
 # Валидные типы сообщений
@@ -36,8 +38,9 @@ VALID_MESSAGE_TYPES = {
 # Валидация UID: только буквы, цифры, дефисы и подчеркивания, максимум 50 символов
 UID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 
-# Валидация room_name: только буквы, цифры, дефисы и подчеркивания, максимум 100 символов
-ROOM_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,100}$')
+# Валидация room_name: любые символы, максимум 100 символов
+# Для WebSocket групп имя будет закодировано через URL-кодирование
+ROOM_NAME_PATTERN = re.compile(r'^.{1,100}$')
 
 # Счетчик участников в комнатах (в памяти, для простоты)
 # В продакшене лучше использовать Redis
@@ -71,7 +74,15 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)  # Invalid room name
             return
         
-        self.room_group_name = f"video_call_{self.room_name}"
+        # Кодируем имя комнаты для использования в WebSocket группах (только ASCII)
+        # Используем base64 для безопасного преобразования (без символов %, которые не разрешены)
+        import base64
+        # Кодируем в bytes, затем в base64, затем декодируем в строку
+        # urlsafe_b64encode использует - и _, которые разрешены в именах групп
+        room_name_bytes = self.room_name.encode('utf-8')
+        encoded_room_name = base64.urlsafe_b64encode(room_name_bytes).decode('ascii').rstrip('=')
+        # urlsafe_b64encode уже использует безопасные символы (- и _), которые разрешены
+        self.room_group_name = f"video_call_{encoded_room_name}"
         
         # Проверка размера комнаты
         # Примечание: точная проверка количества участников требует дополнительной логики
@@ -93,7 +104,17 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         """⚠️ КРИТИЧНО: Полная очистка всех соединений при отключении"""
         # Сохраняем user_uid ПЕРЕД очисткой для логирования
         user_uid_for_log = self.user_uid
-        print(f"[Cleanup] Starting cleanup for user {user_uid_for_log} in room {self.room_name}")
+        room_name_for_log = getattr(self, 'room_name', 'unknown')
+        print(f"[Cleanup] Starting cleanup for user {user_uid_for_log} in room {room_name_for_log}")
+        
+        # Проверяем, что room_group_name был установлен (соединение было успешным)
+        if not hasattr(self, 'room_group_name'):
+            print(f"[Cleanup] No room_group_name found, connection was not fully established")
+            # Очищаем только локальные данные
+            self.pending_messages.clear()
+            self.message_timestamps.clear()
+            self.user_uid = None
+            raise StopConsumer()
         
         # 1. Очищаем очередь сообщений
         self.pending_messages.clear()
@@ -251,16 +272,19 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                             try:
                                 r.delete(key)
                                 deleted_count += 1
-                            except:
+                            except Exception:
+                                # Ignore errors during cleanup - non-critical
                                 pass
-                    except:
+                    except Exception:
+                        # Ignore connection errors during cleanup - non-critical
                         pass
                     finally:
                         # Синхронный клиент закрывается автоматически, но можно явно закрыть соединение
                         if r:
                             try:
                                 r.close()
-                            except:
+                            except Exception:
+                                # Ignore errors when closing - non-critical
                                 pass
                     return deleted_count
                 
@@ -446,14 +470,34 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
 
     # Receive WebRTC signaling message from WebSocket
     async def receive(self, text_data):
-        # Rate limiting
-        if not self._check_rate_limit():
-            print(f"Rate limit exceeded for channel {self.channel_name}")
-            await self.send(text_data=json.dumps({
-                "type": "error",
-                "message": "Rate limit exceeded. Please slow down."
-            }))
-            return
+        # Rate limiting - НЕ применяем для критических сообщений (whiteboard, screen-share, offer, answer)
+        try:
+            text_data_json = json.loads(text_data)
+            message_type = text_data_json.get("type", "")
+            
+            # Критические сообщения не должны блокироваться rate limiting
+            critical_messages = ['whiteboard-draw', 'whiteboard-object', 'whiteboard-cursor', 'whiteboard-clear',
+                               'screen-share-start', 'screen-share-stop', 'screen-share-request-state',
+                               'offer', 'answer', 'user-joined', 'user-left']
+            
+            if message_type not in critical_messages:
+                # Применяем rate limiting только для некритических сообщений
+                if not self._check_rate_limit():
+                    print(f"Rate limit exceeded for channel {self.channel_name} (message type: {message_type})")
+                    await self.send(text_data=json.dumps({
+                        "type": "error",
+                        "message": "Rate limit exceeded. Please slow down."
+                    }))
+                    return
+        except json.JSONDecodeError:
+            # Если не удалось распарсить JSON, применяем rate limiting
+            if not self._check_rate_limit():
+                print(f"Rate limit exceeded for channel {self.channel_name}")
+                await self.send(text_data=json.dumps({
+                    "type": "error",
+                    "message": "Rate limit exceeded. Please slow down."
+                }))
+                return
         
         # Оптимизация: проверяем размер сообщения с учетом типа
         # Ограничиваем размер для предотвращения перегрузки
@@ -557,8 +601,10 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             print(f"[User Join] Room {self.room_name} now has {room_user_count[self.room_group_name]} users")
             
             # Broadcast user-joined to all other users с именем
+            # ВАЖНО: Добавляем поле "from" для совместимости с фронтендом
             await self._send_message_internal({
                         "type": "user-joined",
+                        "from": sender_id,  # Добавляем поле from для совместимости
                         "uid": sender_id,
                 "name": user_name,  # Передаем имя пользователя
                         "room": text_data_json.get("room")
@@ -696,10 +742,16 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             if target_id:
                 message["_target"] = target_id
             try:
+                # Для whiteboard сообщений не применяем rate limiting - они критичны для синхронизации
+                # и должны доставляться немедленно
                 await self.send(text_data=json.dumps(message))
             except Exception as e:
                 # Игнорируем ошибки отправки - соединение может быть уже закрыто
                 # Это нормально при отключении пользователя
+                # Но логируем для whiteboard сообщений для отладки
+                message_type = message.get("type", "")
+                if "whiteboard" in message_type:
+                    print(f"[Whiteboard] Error sending {message_type} to {self.user_uid}: {e}")
                 pass
     
     async def _save_whiteboard_state(self, message_data):

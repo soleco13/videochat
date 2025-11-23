@@ -70,8 +70,9 @@ export function useChat(roomName, userName) {
     
     // Оптимизация: проверяем размер сообщения
     if (message.length > 10000) {
-      console.warn('[Chat] Message too long, truncating')
-      return
+      console.warn('[Chat] Message too long, truncating to 10000 characters')
+      // Обрезаем сообщение до максимальной длины вместо полного игнорирования
+      message = message.substring(0, 10000)
     }
     
     // Отменяем предыдущий таймер

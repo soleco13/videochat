@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Batch Meet - Video Chat</title>
+    {% load static %}
     {% if debug %}
     <!-- Development: Use Vite dev server -->
     <script type="module" src="http://localhost:5173/main.js"></script>
     {% else %}
-    <!-- Production: Use built files -->
-    {% load static %}
-    <link rel="stylesheet" href="{% static 'styles/main.css' %}">
-    <script type="module" src="{% static 'js/main.js' %}"></script>
+    <!-- Production: Use built files with versioning for cache busting -->
+    <link rel="stylesheet" href="{% static 'styles/main.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+    <script type="module" src="{% static 'js/main.js' %}?v={{ STATIC_VERSION|default:'1' }}"></script>
     {% endif %}
 </head>
 <body>

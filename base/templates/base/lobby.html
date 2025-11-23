@@ -1,141 +1,21 @@
-{% extends 'base/main.html' %}
 {% load static %}
-
-{% block extra_head %}
-<!-- Styles for Lobby -->
-{% if USE_BUILT_STATIC or not debug %}
-<link rel="stylesheet" href="{% static 'styles/theme.css' %}?v={{ STATIC_VERSION|default:'1' }}">
-<link rel="stylesheet" href="{% static 'styles/lobby.css' %}?v={{ STATIC_VERSION|default:'1' }}">
-{% else %}
-<link rel="stylesheet" href="http://localhost:5173/styles/theme.css">
-<link rel="stylesheet" href="http://localhost:5173/styles/lobby.css">
-{% endif %}
-{% endblock %}
-
-{% block content %}
-
-<main>
-
-    <section id="form-container">
-
-        <img id="logo" src="{% static 'images/group.svg' %}"/>
-
-        <div id="welcome-message">
-            <h1>Batch Meet</h1>
-            <p>A group video calling platform made for UIT Students!</p>
-        </div>
-
-        <form id="form">
-            <div class="field-wrapper">
-
-                <div class="form-field">
-                    <label>Room:</label>
-                    <input name="room" placeholder="Enter a room name..."  style="text-transform:uppercase" required/>
-                </div>
-
-                <div class="form-field">
-                    <label>Name:</label>
-                    <input name="name" placeholder="Enter your name..."  style="text-transform:uppercase" required/>
-                </div>
-
-                <div class="form-field">
-                    <input type="submit" value="Create/Join Room" />
-                </div>
-            </div>
-        </form>
-        
-        <div id="invite-section" style="display: none; margin-top: 20px; padding: 15px; background-color: #f0f0f0; border-radius: 5px;">
-            <h3 style="margin-top: 0; font-size: 16px;">Invite Link:</h3>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <input type="text" id="invite-link" readonly style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: white;"/>
-                <button onclick="copyInviteLink()" style="padding: 8px 15px; background-color: rgb(75, 93, 172); color: white; border: none; border-radius: 4px; cursor: pointer;">Copy</button>
-            </div>
-            <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">Share this link with others to invite them to the room</p>
-        </div>
-    </section>
-</main>
-
-<script>
-    let form = document.getElementById('form')
-
-    let handleSubmit = async (e) => {
-        e.preventDefault()
-        let room = e.target.room.value.trim().toUpperCase()
-        let name = e.target.name.value.trim().toUpperCase()
-
-        if (!room || !name) {
-            alert('Please fill in all fields')
-            return
-        }
-
-        try {
-            // Create room and get invite link
-            let createResponse = await fetch('/create_room/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    room_name: room,
-                    name: name
-                })
-            })
-            
-            let roomData = await createResponse.json()
-            
-            if (roomData.error) {
-                alert(roomData.error)
-                return
-            }
-
-            // Show invite link
-            const inviteSection = document.getElementById('invite-section')
-            const inviteLink = document.getElementById('invite-link')
-            inviteLink.value = roomData.invite_url
-            inviteSection.style.display = 'block'
-
-            // WebRTC doesn't need tokens, just get UID
-            let response = await fetch(`/get_token/?channel=${room}`)
-            let data = await response.json()
-
-            let UID = data.uid || Math.random().toString(36).substring(7)
-            let token = null
-
-            sessionStorage.setItem('UID', UID)
-            sessionStorage.setItem('token', token || '')
-            sessionStorage.setItem('room', room)
-            sessionStorage.setItem('name', name)
-            localStorage.setItem("username", name);
-            
-            // Redirect after a short delay to show invite link
-            setTimeout(() => {
-                window.open(`/room/${room}`, '_self')
-            }, 1000)
-        } catch (error) {
-            console.error('Error creating room:', error)
-            alert('Error creating room. Please try again.')
-        }
-    }
-
-    function copyInviteLink() {
-        const inviteLink = document.getElementById('invite-link')
-        inviteLink.select()
-        inviteLink.setSelectionRange(0, 99999) // For mobile devices
-        document.execCommand('copy')
-        
-        const button = event.target
-        const originalText = button.textContent
-        button.textContent = 'Copied!'
-        button.style.backgroundColor = '#4CAF50'
-        
-        setTimeout(() => {
-            button.textContent = originalText
-            button.style.backgroundColor = 'rgb(75, 93, 172)'
-        }, 2000)
-    }
-
-    form.addEventListener('submit', handleSubmit)
-</script>
-
-{% endblock content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Meet - Video Chat</title>
+    {% if debug %}
+    <!-- Development: Use Vite dev server -->
+    <script type="module" src="http://localhost:5173/main.js"></script>
+    {% else %}
+    <!-- Production: Use built files with versioning for cache busting -->
+    <link rel="stylesheet" href="{% static 'styles/main.css' %}?v={{ STATIC_VERSION|default:'1' }}">
+    <script type="module" src="{% static 'js/main.js' %}?v={{ STATIC_VERSION|default:'1' }}"></script>
+    {% endif %}
+</head>
+<body>
+    <div id="app"></div>
+</body>
+</html>
 

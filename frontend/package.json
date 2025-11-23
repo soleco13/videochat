@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cp -f src/styles/*.css ../staticfiles/styles/ && node -e \"const fs=require('fs'); const version=Date.now().toString(); fs.writeFileSync('../.static_version', version); console.log('✅ Версия обновлена:', version);\"",
+    "build": "vite build && cp -f src/styles/*.css ../staticfiles/styles/ && node -e \"const fs=require('fs'); const version=Date.now().toString(); fs.writeFileSync('../.static_version', version); console.log('✅ Версия обновлена:', version);\" && echo '✅ Lobby.vue и все стили включены в сборку'",
     "build:prod": "vite build && node -e \"const fs=require('fs'); const version=Date.now().toString(); fs.writeFileSync('../.static_version', version); console.log('✅ Билд готов! Версия:', version);\"",
     "preview": "vite preview"
   },

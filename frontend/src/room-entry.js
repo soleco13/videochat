@@ -8,6 +8,15 @@
 // Import Whiteboard Manager
 import { WhiteboardManager } from './whiteboard.js';
 
+// Import Adaptive Layout System
+import {
+    getDeviceType,
+    calculateGridLayout,
+    applyLayout,
+    applyGridLayout,
+    getContainerSize
+} from './adaptive-layout.js';
+
 // ============================================================================
 // TURN Server Testing and Optimization
 // ============================================================================
@@ -649,7 +658,8 @@ async function initApp() {
         micTrack: null, // Трек микрофона (для использования при демонстрации экрана)
         mixedAudioStream: null,  // Микшированный аудио стрим (микрофон + звук экрана)
         audioContext: null,  // Web Audio API контекст для микширования
-        currentSharingUser: null  // UID пользователя, который демонстрирует экран
+        currentSharingUser: null,  // UID пользователя, который демонстрирует экран
+        cameraStream: null  // Сохраненный стрим камеры пользователя (для восстановления после screen share)
     };
     
     // Асинхронная инициализация оптимизированной конфигурации
@@ -790,6 +800,20 @@ async function initApp() {
     }
     
     function updateVideoDisplayInternal(uid, stream, videoContainer, isLocal, hasVideoParam) {
+        // ВАЖНО: Если это локальный пользователь и включен screen share, ВСЕГДА используем cameraStream вместо localStream
+        // Это критично для мобильных устройств, чтобы камера не заменялась на screen share
+        if (isLocal && state.isScreenSharing) {
+            if (state.cameraStream) {
+                // Для камеры пользователя используем сохраненный cameraStream (без screen share)
+                stream = state.cameraStream;
+                console.log('[Video] Using cameraStream for local user during screen share, videoTracks:', state.cameraStream.getVideoTracks().length);
+            } else {
+                // Если cameraStream не создан, создаем пустой стрим (камера не будет отображаться)
+                stream = new MediaStream();
+                console.warn('[Video] cameraStream not found for local user during screen share, using empty stream');
+            }
+        }
+        
         const video = videoContainer.querySelector('video');
         const svgPlaceholder = videoContainer.querySelector('.no-cam-placeholder');
         const loader = !isLocal ? videoContainer.querySelector('.video-loader') : null;
@@ -870,6 +894,22 @@ async function initApp() {
                                 } else {
                                     video.srcObject = stream;
                                 }
+                                
+                                // Оптимизация для мобильных: применяем ограничения качества к удаленным потокам
+                                if (!isLocal && isMobile && stream.getVideoTracks().length > 0) {
+                                    const videoTrack = stream.getVideoTracks()[0];
+                                    if (videoTrack && typeof videoTrack.applyConstraints === 'function') {
+                                        // Пытаемся снизить качество для мобильных устройств
+                                        videoTrack.applyConstraints({
+                                            width: { ideal: 640, max: 1280 },
+                                            height: { ideal: 480, max: 720 },
+                                            frameRate: { ideal: 15, max: 30 }
+                                        }).catch(err => {
+                                            // Игнорируем ошибки - не все браузеры поддерживают изменение удаленных треков
+                                            console.log('[Video] Could not apply constraints to remote track (expected):', err.message);
+                                        });
+                                    }
+                                }
                             }
                             
                             // Для удаленных пользователей убеждаемся, что аудио не приглушено
@@ -883,6 +923,13 @@ async function initApp() {
                                 console.log('[Video] Showing video in updateVideoDisplayInternal for', uid);
                             }
                             
+                            // Оптимизация для мобильных: последовательное воспроизведение вместо одновременного
+                            // Для мобильных устройств добавляем задержку между воспроизведением видео
+                            const displayedVideosArray = Array.from(state.displayedVideos);
+                            const videoIndex = displayedVideosArray.indexOf(uid);
+                            const playDelay = isMobile && !isLocal && videoIndex >= 0 ? 
+                                (videoIndex * 200) : 0;
+                            
                             // Запускаем воспроизведение только если видео приостановлено или еще не загружено
                             // Для локального видео всегда пытаемся запустить при включении камеры
                             const shouldPlay = (shouldUpdate && (video.paused || video.readyState < 2)) || 
@@ -890,27 +937,37 @@ async function initApp() {
                             
                             if (shouldPlay) {
                                 const loaderForPlay = !isLocal ? videoContainer.querySelector('.video-loader') : null;
-                                state.videoPlayPromises[uid] = video.play().catch(err => {
-                                    // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
-                                    if (err.name !== 'AbortError') {
-                                        console.error('[Video] Error playing video in updateVideoDisplayInternal:', err);
-                                    }
-                                    // Скрываем лоадер при ошибке
-                                    if (loaderForPlay) {
-                                        loaderForPlay.style.opacity = '0';
-                                        loaderForPlay.style.transition = 'opacity 0.3s ease-out';
-                                        setTimeout(() => {
-                                            loaderForPlay.style.display = 'none';
-                                            loaderForPlay.style.visibility = 'hidden';
-                                            state.loaderHidden[uid] = true;
-                                        }, 300);
-                                    }
-                                });
+                                
+                                const playVideo = () => {
+                                    state.videoPlayPromises[uid] = video.play().catch(err => {
+                                        // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
+                                        if (err.name !== 'AbortError') {
+                                            console.error('[Video] Error playing video in updateVideoDisplayInternal:', err);
+                                        }
+                                        // Скрываем лоадер при ошибке
+                                        if (loaderForPlay) {
+                                            loaderForPlay.style.opacity = '0';
+                                            loaderForPlay.style.transition = 'opacity 0.3s ease-out';
+                                            setTimeout(() => {
+                                                loaderForPlay.style.display = 'none';
+                                                loaderForPlay.style.visibility = 'hidden';
+                                                state.loaderHidden[uid] = true;
+                                            }, 300);
+                                        }
+                                    });
+                                };
+                                
+                                if (playDelay > 0) {
+                                    setTimeout(playVideo, playDelay);
+                                    console.log(`[Video] Delaying video play for ${uid} by ${playDelay}ms (mobile optimization)`);
+                                } else {
+                                    playVideo();
+                                }
                             }
                         }
                         
                         delete state.videoUpdateTimers[uid];
-                    }, 150); // Дебаунс 150ms
+                    }, debounceDelay);
                 }
                 if (svgPlaceholder && svgPlaceholder.style.display !== 'none') {
                     svgPlaceholder.style.display = 'none';
@@ -1460,8 +1517,34 @@ async function initApp() {
     async function initializeWebRTC() {
         try {
             console.log('[WebRTC] Requesting user media...');
+            
+            // Определяем тип устройства для адаптивного качества видео
+            const deviceType = getDeviceType();
+            const isMobile = deviceType.type === 'phone' || deviceType.type === 'tablet';
+            
+            // Адаптивные настройки качества видео в зависимости от устройства
+            let videoConstraints = state.isVideoEnabled;
+            if (state.isVideoEnabled && isMobile) {
+                // Для мобильных устройств используем более низкое разрешение для экономии ресурсов
+                videoConstraints = {
+                    width: { ideal: 640, max: 1280 },
+                    height: { ideal: 480, max: 720 },
+                    frameRate: { ideal: 15, max: 30 }, // Снижаем FPS для мобильных
+                    facingMode: 'user'
+                };
+                console.log('[WebRTC] Using mobile-optimized video constraints:', videoConstraints);
+            } else if (state.isVideoEnabled) {
+                // Для десктопа используем более высокое качество
+                videoConstraints = {
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 },
+                    frameRate: { ideal: 30, max: 60 }
+                };
+                console.log('[WebRTC] Using desktop video constraints:', videoConstraints);
+            }
+            
             state.localStream = await navigator.mediaDevices.getUserMedia({
-                video: state.isVideoEnabled,
+                video: videoConstraints,
                 audio: state.isAudioEnabled
             });
             console.log('[WebRTC] User media obtained, adding video stream...');
@@ -1617,6 +1700,38 @@ async function initApp() {
                 room: state.roomName
             }));
                 }
+                
+                // Получаем список существующих участников комнаты и создаем для них offers
+                // Это важно, потому что существующие пользователи не отправят user-joined для нового пользователя
+                (async () => {
+                    try {
+                        const response = await fetch(`/get_room_members/?room_name=${encodeURIComponent(state.roomName)}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.members && data.members.length > 0) {
+                                console.log(`[WebRTC] Found ${data.members.length} existing members in room, creating offers...`);
+                                setTimeout(async () => {
+                                    for (const member of data.members) {
+                                        if (member.UID && member.UID !== state.uid && !state.peerConnections[member.UID]) {
+                                            console.log(`[WebRTC] Creating offer for existing member: ${member.UID} (${member.name || 'unknown'})`);
+                                            // Сохраняем имя пользователя если есть
+                                            if (member.name) {
+                                                state.userNames[member.UID] = member.name;
+                                            }
+                                            // Добавляем в очередь для создания offer
+                                            queueOfferCreation(member.UID);
+                                            // Небольшая задержка между offers для стабильности
+                                            await new Promise(resolve => setTimeout(resolve, 100));
+                                        }
+                                    }
+                                }, 500); // Задержка для стабилизации соединения
+                            }
+                        }
+                    } catch (error) {
+                        console.error('[WebRTC] Error getting room members:', error);
+                        // Не критично - продолжаем работу
+                    }
+                })();
                 
                 // Отправляем начальное состояние камеры и аудио
                 if (state.localStream) {
@@ -1790,42 +1905,44 @@ async function initApp() {
         switch (data.type) {
             case 'user-joined':
             case 'join':
-                if (data.uid && data.uid !== state.uid) {
+                // Поддерживаем оба формата: data.uid и data.from
+                const joinedUserId = data.uid || data.from;
+                if (joinedUserId && joinedUserId !== state.uid) {
                     // Сохраняем имя пользователя если передано
                     if (data.name) {
-                        state.userNames[data.uid] = data.name;
-                        console.log('[WebRTC] User joined:', data.uid, '- name:', data.name);
+                        state.userNames[joinedUserId] = data.name;
+                        console.log('[WebRTC] User joined:', joinedUserId, '- name:', data.name);
                     } else {
-                        console.log('[WebRTC] User joined:', data.uid, '- name not provided');
+                        console.log('[WebRTC] User joined:', joinedUserId, '- name not provided');
                     }
                     
                     // Обновляем отображение имени если видео уже отображается
-                    const existingContainer = document.getElementById(`video-${data.uid}`);
+                    const existingContainer = document.getElementById(`video-${joinedUserId}`);
                     if (existingContainer && data.name) {
                         const usernameWrapper = existingContainer.querySelector('.username-wrapper');
                         if (usernameWrapper) {
                             usernameWrapper.textContent = data.name;
-                            console.log(`[WebRTC] Updated display name for ${data.uid} to: ${data.name}`);
+                            console.log(`[WebRTC] Updated display name for ${joinedUserId} to: ${data.name}`);
                         }
                     }
                     
                     // Если соединение уже существует, пропускаем
-                    if (state.peerConnections[data.uid]) {
-                        console.log(`[WebRTC] Connection already exists for ${data.uid}, skipping`);
+                    if (state.peerConnections[joinedUserId]) {
+                        console.log(`[WebRTC] Connection already exists for ${joinedUserId}, skipping`);
                         return;
                     }
                     
                     // Если offer pending, но соединения нет - возможно, предыдущий offer не был создан
                     // Очищаем флаг и создаем новый offer
-                    if (state.pendingOffers.has(data.uid) && !state.peerConnections[data.uid]) {
-                        console.warn(`[WebRTC] Offer pending for ${data.uid} but no connection exists, clearing flag and creating new offer`);
-                        state.pendingOffers.delete(data.uid);
-                        state.negotiationInProgress.delete(data.uid);
+                    if (state.pendingOffers.has(joinedUserId) && !state.peerConnections[joinedUserId]) {
+                        console.warn(`[WebRTC] Offer pending for ${joinedUserId} but no connection exists, clearing flag and creating new offer`);
+                        state.pendingOffers.delete(joinedUserId);
+                        state.negotiationInProgress.delete(joinedUserId);
                     }
                     
                     // Проверяем, не идет ли уже переговоры
-                    if (state.negotiationInProgress.has(data.uid)) {
-                        console.log(`[WebRTC] Negotiation in progress for ${data.uid}, skipping duplicate user-joined`);
+                    if (state.negotiationInProgress.has(joinedUserId)) {
+                        console.log(`[WebRTC] Negotiation in progress for ${joinedUserId}, skipping duplicate user-joined`);
                         return;
                     }
                     
@@ -1837,11 +1954,11 @@ async function initApp() {
                     // НЕ устанавливаем состояние камеры по умолчанию при user-joined
                     // Состояние будет установлено только через явные сообщения camera-enabled/camera-disabled
                     // Это гарантирует, что заглушка будет показана до получения подтверждения, что камера включена
-                    if (!state.userCameraStates.hasOwnProperty(data.uid)) {
+                    if (!state.userCameraStates.hasOwnProperty(joinedUserId)) {
                         // НЕ устанавливаем состояние - по умолчанию будет показана заглушка
                         console.log('[WebRTC] Waiting for camera state message (will show placeholder by default)');
                     } else {
-                        console.log('[WebRTC] Camera state already set for', data.uid, ':', state.userCameraStates[data.uid]);
+                        console.log('[WebRTC] Camera state already set for', joinedUserId, ':', state.userCameraStates[joinedUserId]);
                     }
                     
                     // Оптимизация: отправляем состояние камеры и аудио только один раз с небольшой задержкой
@@ -1857,31 +1974,31 @@ async function initApp() {
                             state.videoSocket.send(JSON.stringify({
                                 type: isVideoEnabled ? 'camera-enabled' : 'camera-disabled',
                                 from: state.uid,
-                                to: data.uid,  // Отправляем конкретно новому пользователю
+                                to: joinedUserId,  // Отправляем конкретно новому пользователю
                                 room: state.roomName
                             }));
-                            console.log('[WebRTC] Sent current camera state to new user', data.uid, ':', isVideoEnabled ? 'enabled' : 'disabled');
+                            console.log('[WebRTC] Sent current camera state to new user', joinedUserId, ':', isVideoEnabled ? 'enabled' : 'disabled');
                             
                             // Отправляем состояние аудио
                             state.videoSocket.send(JSON.stringify({
                                 type: isAudioEnabled ? 'audio-enabled' : 'audio-disabled',
                                 from: state.uid,
-                                to: data.uid,  // Отправляем конкретно новому пользователю
+                                to: joinedUserId,  // Отправляем конкретно новому пользователю
                                 room: state.roomName
                             }));
-                            console.log('[WebRTC] Sent current audio state to new user', data.uid, ':', isAudioEnabled ? 'enabled' : 'disabled');
+                            console.log('[WebRTC] Sent current audio state to new user', joinedUserId, ':', isAudioEnabled ? 'enabled' : 'disabled');
                         }
                     }, 100);
                     
                     // Исправление race condition: проверяем еще раз перед добавлением
                     // Добавляем в очередь для последовательной обработки (стабильность при 3+ пользователях)
-                    if (!state.pendingOffers.has(data.uid) && 
-                        !state.peerConnections[data.uid] && 
-                        !state.negotiationInProgress.has(data.uid)) {
-                        console.log(`[WebRTC] Queueing offer creation for new user: ${data.uid}`);
-                        queueOfferCreation(data.uid);
+                    if (!state.pendingOffers.has(joinedUserId) && 
+                        !state.peerConnections[joinedUserId] && 
+                        !state.negotiationInProgress.has(joinedUserId)) {
+                        console.log(`[WebRTC] Queueing offer creation for new user: ${joinedUserId}`);
+                        queueOfferCreation(joinedUserId);
                     } else {
-                        console.log(`[WebRTC] Skipping offer creation for ${data.uid} - pending: ${state.pendingOffers.has(data.uid)}, connection: ${!!state.peerConnections[data.uid]}, negotiating: ${state.negotiationInProgress.has(data.uid)}`);
+                        console.log(`[WebRTC] Skipping offer creation for ${joinedUserId} - pending: ${state.pendingOffers.has(joinedUserId)}, connection: ${!!state.peerConnections[joinedUserId]}, negotiating: ${state.negotiationInProgress.has(joinedUserId)}`);
                     }
                 }
                 break;
@@ -2329,12 +2446,96 @@ async function initApp() {
                 console.log('[ScreenShare] Screen sharing started by user:', sharingUser);
                 state.currentSharingUser = sharingUser;
                 updateScreenShareButton();
+                
+                // Обновляем layout для режима screen sharing
+                // Layout создаст отдельный контейнер для screen share
+                // ВАЖНО: Вызываем updateVideoLayout, который вызовет setupScreenShareLayout
+                updateVideoLayout();
+                
+                // Обновляем stream для screen share контейнера после задержки
+                // Используем несколько попыток для надежности на мобильных устройствах
+                const setupScreenShareStream = () => {
+                    const screenShareContainer = document.querySelector('.screen-share-container');
+                    if (screenShareContainer) {
+                        let screenShareVideo = screenShareContainer.querySelector('video');
+                        if (!screenShareVideo) {
+                            // Если video элемент еще не создан, создаем его
+                            const screenShareVideoContainer = screenShareContainer.querySelector(`#screen-share-${sharingUser}`);
+                            if (!screenShareVideoContainer) {
+                                // Создаем контейнер для screen share видео
+                                const newContainer = document.createElement('div');
+                                newContainer.className = 'video-container screen-share-video';
+                                newContainer.id = `screen-share-${sharingUser}`;
+                                
+                                const videoElement = document.createElement('video');
+                                videoElement.autoplay = true;
+                                videoElement.playsInline = true;
+                                videoElement.muted = false;
+                                videoElement.className = 'video-player';
+                                newContainer.appendChild(videoElement);
+                                
+                                const usernameWrapper = document.createElement('div');
+                                usernameWrapper.className = 'username-wrapper';
+                                usernameWrapper.textContent = state.userNames[sharingUser] || `User ${sharingUser}`;
+                                newContainer.appendChild(usernameWrapper);
+                                
+                                screenShareContainer.appendChild(newContainer);
+                                screenShareVideo = videoElement;
+                                console.log('[ScreenShare] Created screen share video container for user:', sharingUser);
+                            } else {
+                                screenShareVideo = screenShareVideoContainer.querySelector('video');
+                            }
+                        }
+                        
+                        if (screenShareVideo && !screenShareVideo.srcObject) {
+                            const peerConnection = state.peerConnections[sharingUser];
+                            if (peerConnection) {
+                                peerConnection.getReceivers().forEach(receiver => {
+                                    if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState === 'live') {
+                                        const trackLabel = receiver.track.label.toLowerCase();
+                                        if (trackLabel.includes('screen') || trackLabel.includes('display') || trackLabel.includes('window')) {
+                                            const stream = new MediaStream([receiver.track]);
+                                            // Добавляем аудио треки
+                                            peerConnection.getReceivers().forEach(audioReceiver => {
+                                                if (audioReceiver.track && audioReceiver.track.kind === 'audio' && audioReceiver.track.readyState === 'live') {
+                                                    stream.addTrack(audioReceiver.track);
+                                                }
+                                            });
+                                            screenShareVideo.pause();
+                                            screenShareVideo.srcObject = stream;
+                                            screenShareVideo.muted = false;
+                                            setTimeout(() => {
+                                                screenShareVideo.play().catch(err => {
+                                                    if (err.name !== 'AbortError') {
+                                                        console.error('[ScreenShare] Error playing remote screen share:', err);
+                                                    }
+                                                });
+                                            }, 50);
+                                            console.log('[ScreenShare] Set screen share stream for user:', sharingUser);
+                                        }
+                                    }
+                                });
+                            } else {
+                                console.warn('[ScreenShare] Peer connection not found for user:', sharingUser);
+                            }
+                        }
+                    } else {
+                        console.warn('[ScreenShare] Screen share container not found, will retry');
+                    }
+                };
+                
+                // Вызываем несколько раз для надежности на мобильных устройствах
+                setTimeout(setupScreenShareStream, 300);
+                setTimeout(setupScreenShareStream, 800);
+                setTimeout(setupScreenShareStream, 1500);
                 break;
             case 'screen-share-stopped':
                 // Демонстрация экрана остановлена
                 console.log('[ScreenShare] Screen sharing stopped by user:', data.from);
                 state.currentSharingUser = null;
                 updateScreenShareButton();
+                // Обновляем layout для обычного режима
+                updateVideoLayout();
                 break;
             case 'screen-share-state':
                 // Получено состояние демонстрации экрана (при подключении)
@@ -2346,6 +2547,8 @@ async function initApp() {
                     state.currentSharingUser = null;
                 }
                 updateScreenShareButton();
+                // Обновляем layout
+                updateVideoLayout();
                 break;
             case 'screen-share-error':
                 // Ошибка при попытке начать демонстрацию экрана
@@ -2402,9 +2605,9 @@ async function initApp() {
                 console.log(`[WebRTC] Creating offer for queued user: ${targetUid}`);
                 await createOffer(targetUid);
                 
-                // Небольшая задержка между соединениями для стабильности
+                // Задержка между соединениями для стабильности (увеличена для поддержки 10 пользователей)
                 if (state.connectionQueue.length > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 300)); // 300ms между соединениями
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 500ms между соединениями
                 }
             } catch (error) {
                 console.error(`[WebRTC] Error creating offer for ${targetUid}:`, error);
@@ -2558,32 +2761,27 @@ async function initApp() {
                 const currentState = peerConnection.signalingState;
                 const iceState = peerConnection.iceConnectionState;
                 
-                // Не закрываем соединение если оно уже установлено (connected) или в процессе установки (connecting)
-                if (iceState === 'connected' || iceState === 'connecting') {
+                // Не закрываем соединение если оно уже установлено или в процессе установки
+                if (iceState === 'connected' || iceState === 'connecting' || iceState === 'checking') {
                     console.log(`[WebRTC] Connection to ${data.from} is ${iceState}, ignoring duplicate offer`);
                     state.negotiationInProgress.delete(data.from);
                     return; // Игнорируем дублирующийся offer
                 }
                 
-                // Если соединение в состоянии, которое не позволяет принять новый offer,
-                // закрываем старое соединение и создаем новое
-                // НО не закрываем если ICE в процессе установки (checking, connecting)
-                if (currentState === 'have-remote-offer' || currentState === 'stable') {
-                    // Не закрываем если соединение активно устанавливается
-                    if (iceState === 'checking' || iceState === 'connecting') {
-                        console.log(`[WebRTC] Connection to ${data.from} is ${iceState}, ignoring duplicate offer`);
-                        state.negotiationInProgress.delete(data.from);
-                        return; // Игнорируем дублирующийся offer, даем время на установку
-                    }
-                    
-                    console.log(`[WebRTC] Closing existing connection for ${data.from} to handle new offer (state: ${currentState}, ICE: ${iceState})`);
+                // Если соединение в состоянии failed или disconnected, закрываем и создаем новое
+                if (iceState === 'failed' || iceState === 'disconnected') {
+                    console.log(`[WebRTC] Connection to ${data.from} is ${iceState}, closing and recreating`);
                     peerConnection.close();
                     delete state.peerConnections[data.from];
-                    // Очищаем очередь ICE кандидатов
                     if (state.iceCandidateQueue[data.from]) {
                         delete state.iceCandidateQueue[data.from];
                     }
                     peerConnection = null;
+                } else if (currentState === 'have-remote-offer') {
+                    // Если уже есть remote offer, игнорируем новый (возможно дубликат)
+                    console.log(`[WebRTC] Already have remote offer for ${data.from}, ignoring duplicate`);
+                    state.negotiationInProgress.delete(data.from);
+                    return;
                 }
             }
             
@@ -3254,26 +3452,72 @@ async function initApp() {
                 
                 // Добавляем обработчики для отслеживания изменений треков
                 videoTracks.forEach(track => {
-                    console.log('[WebRTC] Track enabled:', track.enabled, 'readyState:', track.readyState);
-                    
-                    // НЕ отслеживаем изменения enabled для удаленных пользователей
-                    // Состояние камеры управляется только через WebSocket сообщения
-                    // Удаленный трек может менять enabled, но это не должно влиять на отображение
+                    console.log('[WebRTC] Video track enabled:', track.enabled, 'readyState:', track.readyState);
                     
                     track.addEventListener('ended', () => {
                         console.log('[WebRTC] Remote video track ended for:', targetUid);
-                        // НЕ вызываем updateVideoDisplay для удаленных пользователей
-                        // Состояние управляется только через WebSocket сообщения
+                        // Обновляем отображение при завершении трека
+                        const videoContainer = document.getElementById(`video-${targetUid}`);
+                        if (videoContainer) {
+                            const video = videoContainer.querySelector('video');
+                            if (video && video.srcObject) {
+                                // Проверяем, есть ли еще активные треки в stream
+                                const stream = video.srcObject;
+                                const activeTracks = stream.getVideoTracks().filter(t => t.readyState === 'live');
+                                if (activeTracks.length === 0) {
+                                    console.log('[WebRTC] No active video tracks for', targetUid, '- hiding video');
+                                    video.style.display = 'none';
+                                }
+                            }
+                        }
                     });
                     
-                    // НЕ обрабатываем mute/unmute для удаленных пользователей
-                    // Состояние камеры управляется только через WebSocket сообщения
                     track.addEventListener('mute', () => {
-                        console.log('[WebRTC] Remote video track muted for:', targetUid, '(ignored - state managed via WebSocket)');
+                        console.log('[WebRTC] Remote video track muted for:', targetUid);
                     });
                     
                     track.addEventListener('unmute', () => {
-                        console.log('[WebRTC] Remote video track unmuted for:', targetUid, '(ignored - state managed via WebSocket)');
+                        console.log('[WebRTC] Remote video track unmuted for:', targetUid);
+                    });
+                });
+                
+                // Добавляем обработчики для аудио треков (критично для предотвращения потери звука)
+                audioTracks.forEach(track => {
+                    console.log('[WebRTC] Audio track enabled:', track.enabled, 'readyState:', track.readyState);
+                    
+                    track.addEventListener('ended', () => {
+                        console.warn('[WebRTC] Remote audio track ended for:', targetUid, '- audio may be lost');
+                        // Пытаемся найти новый аудио трек в stream
+                        const videoContainer = document.getElementById(`video-${targetUid}`);
+                        if (videoContainer) {
+                            const video = videoContainer.querySelector('video');
+                            if (video && video.srcObject) {
+                                const stream = video.srcObject;
+                                const activeAudioTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
+                                if (activeAudioTracks.length === 0) {
+                                    console.warn('[WebRTC] No active audio tracks for', targetUid);
+                                    // Проверяем remoteStreams для обновления
+                                    if (state.remoteStreams && state.remoteStreams[targetUid]) {
+                                        const remoteStream = state.remoteStreams[targetUid];
+                                        const newAudioTracks = remoteStream.getAudioTracks().filter(t => t.readyState === 'live');
+                                        if (newAudioTracks.length > 0) {
+                                            console.log('[WebRTC] Found new audio tracks, updating stream for', targetUid);
+                                            // Обновляем stream с новыми аудио треками
+                                            const newStream = new MediaStream([...video.srcObject.getVideoTracks(), ...newAudioTracks]);
+                                            video.srcObject = newStream;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    
+                    track.addEventListener('mute', () => {
+                        console.log('[WebRTC] Remote audio track muted for:', targetUid);
+                    });
+                    
+                    track.addEventListener('unmute', () => {
+                        console.log('[WebRTC] Remote audio track unmuted for:', targetUid);
                     });
                 });
                 
@@ -3282,17 +3526,207 @@ async function initApp() {
                 console.log('[WebRTC] Has active video:', hasActiveVideo);
                 console.log('[WebRTC] Current camera state for', targetUid, ':', state.userCameraStates.hasOwnProperty(targetUid) ? state.userCameraStates[targetUid] : 'not set');
                 
-                // НЕ устанавливаем состояние камеры по умолчанию при получении стрима
-                // Если состояние не установлено, показываем видео если трек активен
-                // Состояние будет установлено через WebSocket сообщения
-                const cameraStateSet = state.userCameraStates.hasOwnProperty(targetUid);
-                if (!cameraStateSet) {
-                    // Если состояние не установлено, используем состояние трека как временное
-                    // Это позволит показать видео, если трек активен, до получения явного сообщения
-                    console.log('[WebRTC] Camera state not set for', targetUid, '- will use track state temporarily:', hasActiveVideo);
+                // Проверяем, является ли это screen share track
+                const screenShareTracks = videoTracks.filter(track => {
+                    const label = track.label.toLowerCase();
+                    return label.includes('screen') || label.includes('display') || label.includes('window');
+                });
+                const cameraTracks = videoTracks.filter(track => {
+                    const label = track.label.toLowerCase();
+                    return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+                });
+                
+                const hasScreenShareTrack = screenShareTracks.length > 0;
+                const hasCameraTrack = cameraTracks.length > 0;
+                
+                // ВАЖНО: Если пользователь делится экраном, используем ту же логику, что и для локального пользователя
+                if (hasScreenShareTrack && state.currentSharingUser === targetUid) {
+                    console.log('[WebRTC] Screen share track received for user:', targetUid);
+                    
+                    // ВАЖНО: Обновляем layout ПЕРЕД созданием контейнеров
+                    // Это гарантирует, что CSS классы и структура будут правильными для всех устройств
+                    console.log('[WebRTC] Updating video layout for screen share from remote user:', targetUid);
+                    updateVideoLayout();
+                    
+                    // Создаем функцию для установки screen share stream
+                    // Эта функция будет вызвана после обновления layout
+                    const setupRemoteScreenShare = () => {
+                        const container = document.querySelector('.video-streams');
+                        if (!container) {
+                            console.warn('[WebRTC] Video streams container not found');
+                            return;
+                        }
+                        
+                        // Убеждаемся, что контейнер в режиме screen sharing
+                        if (!container.classList.contains('screen-share-mode')) {
+                            container.classList.add('screen-share-mode');
+                            console.log('[WebRTC] Added screen-share-mode class to container');
+                        }
+                        
+                        // Создаем или находим screen-share-container
+                        let screenShareContainer = container.querySelector('.screen-share-container');
+                        if (!screenShareContainer) {
+                            screenShareContainer = document.createElement('div');
+                            screenShareContainer.className = 'screen-share-container';
+                            container.insertBefore(screenShareContainer, container.firstChild);
+                            console.log('[WebRTC] Created screen-share-container');
+                        }
+                        
+                        // Создаем или находим контейнер для screen share видео
+                        let screenShareVideoContainer = screenShareContainer.querySelector(`#screen-share-${targetUid}`);
+                        if (!screenShareVideoContainer) {
+                            screenShareVideoContainer = document.createElement('div');
+                            screenShareVideoContainer.className = 'video-container screen-share-video';
+                            screenShareVideoContainer.id = `screen-share-${targetUid}`;
+                            
+                            const videoElement = document.createElement('video');
+                            videoElement.autoplay = true;
+                            videoElement.playsInline = true;
+                            videoElement.muted = false; // Для удаленного не muted
+                            videoElement.className = 'video-player';
+                            screenShareVideoContainer.appendChild(videoElement);
+                            
+                            const usernameWrapper = document.createElement('div');
+                            usernameWrapper.className = 'username-wrapper';
+                            usernameWrapper.textContent = state.userNames[targetUid] || `User ${targetUid}`;
+                            screenShareVideoContainer.appendChild(usernameWrapper);
+                            
+                            screenShareContainer.appendChild(screenShareVideoContainer);
+                            console.log('[WebRTC] Created screen-share-video container for user:', targetUid);
+                        }
+                        
+                        // Устанавливаем stream
+                        const screenShareVideo = screenShareVideoContainer.querySelector('video');
+                        if (screenShareVideo) {
+                            // Создаем новый stream только с screen share track
+                            const screenShareStream = new MediaStream(screenShareTracks);
+                            // Добавляем аудио треки из screen share, если есть
+                            const audioTracks = remoteStream.getAudioTracks();
+                            audioTracks.forEach(track => screenShareStream.addTrack(track));
+                            
+                            // Останавливаем предыдущий play() если он есть
+                            screenShareVideo.pause();
+                            screenShareVideo.srcObject = screenShareStream;
+                            setTimeout(() => {
+                                screenShareVideo.play().catch(err => {
+                                    if (err.name !== 'AbortError') {
+                                        console.error('[WebRTC] Error playing screen share:', err);
+                                    }
+                                });
+                            }, 50);
+                            console.log('[WebRTC] Screen share stream set in container for user:', targetUid);
+                        } else {
+                            console.warn('[WebRTC] Screen share video element not found in container');
+                        }
+                    };
+                    
+                    // Вызываем setupRemoteScreenShare после обновления layout
+                    // Используем несколько попыток для надежности на мобильных устройствах
+                    setTimeout(() => {
+                        setupRemoteScreenShare();
+                    }, 200);
+                    
+                    // Повторная попытка через больший интервал для мобильных устройств
+                    setTimeout(() => {
+                        setupRemoteScreenShare();
+                    }, 600);
                 }
                 
+                // ВАЖНО: Если пользователь делится экраном, его камера должна быть отдельно от screen share
+                // Screen share идет в screen-share-container, камера - в participants-panel
+                
+                // Сначала проверяем и удаляем screen share из контейнера пользователя, если он там есть
+                const existingVideoContainer = document.getElementById(`video-${targetUid}`);
+                if (existingVideoContainer) {
+                    const existingVideo = existingVideoContainer.querySelector('video');
+                    if (existingVideo && existingVideo.srcObject) {
+                        const existingStream = existingVideo.srcObject;
+                        const existingVideoTracks = existingStream.getVideoTracks();
+                        const isScreenShareInContainer = existingVideoTracks.some(track => {
+                            const label = track.label.toLowerCase();
+                            return label.includes('screen') || label.includes('display') || label.includes('window');
+                        });
+                        
+                        if (isScreenShareInContainer) {
+                            // В контейнере пользователя отображается screen share - удаляем контейнер
+                            console.log('[WebRTC] Removing screen share from user container:', targetUid);
+                            existingVideoContainer.remove();
+                            // Удаляем из displayedVideos, чтобы можно было создать новый контейнер для камеры
+                            state.displayedVideos.delete(targetUid);
+                        }
+                    }
+                }
+                
+                // Если есть камера (не screen share), добавляем её в обычный контейнер
+                // ВАЖНО: Камера пользователя, который делится экраном, будет перемещена в participants-panel через setupScreenShareLayout
+                if (hasCameraTrack) {
+                    // Создаем stream только с камерой (без screen share)
+                    const cameraStream = new MediaStream(cameraTracks);
+                    // Добавляем аудио треки (если они не из screen share)
+                    const audioTracks = remoteStream.getAudioTracks();
+                    audioTracks.forEach(track => {
+                        // Проверяем, что это не screen audio
+                        const trackLabel = track.label.toLowerCase();
+                        if (!trackLabel.includes('screen') && !trackLabel.includes('display')) {
+                            cameraStream.addTrack(track);
+                        }
+                    });
+                    
+                    console.log('[WebRTC] Camera track found for user:', targetUid, '- adding to regular container');
+                    
+                    // ВАЖНО: Если пользователь делится экраном, убеждаемся что камера не заменяется на screen share
+                    // Проверяем еще раз перед добавлением
+                    const checkContainer = document.getElementById(`video-${targetUid}`);
+                    if (checkContainer) {
+                        const checkVideo = checkContainer.querySelector('video');
+                        if (checkVideo && checkVideo.srcObject) {
+                            const checkStream = checkVideo.srcObject;
+                            const checkTracks = checkStream.getVideoTracks();
+                            const hasScreenShare = checkTracks.some(track => {
+                                const label = track.label.toLowerCase();
+                                return label.includes('screen') || label.includes('display') || label.includes('window');
+                            });
+                            
+                            if (hasScreenShare) {
+                                console.log('[WebRTC] Container still has screen share, removing before adding camera:', targetUid);
+                                checkContainer.remove();
+                                state.displayedVideos.delete(targetUid);
+                            }
+                        }
+                    }
+                    
+                    // Добавляем камеру в обычный контейнер
+                    // Если screen share активен, setupScreenShareLayout переместит её в participants-panel
+                    addVideoStream(targetUid, cameraStream, false);
+                } else if (!hasScreenShareTrack) {
+                    // Нет ни камеры, ни screen share - добавляем весь stream (может быть только аудио)
+                    console.log('[WebRTC] No camera or screen share track, adding full stream for user:', targetUid);
                 addVideoStream(targetUid, remoteStream, false);
+                } else if (!hasCameraTrack && hasScreenShareTrack && state.currentSharingUser === targetUid) {
+                    // Только screen share, нет камеры - не добавляем в обычный контейнер
+                    console.log('[WebRTC] Only screen share track for user:', targetUid, '- not adding to regular container');
+                    
+                    // Убеждаемся, что видео контейнер пользователя не отображает screen share
+                    // (уже проверили выше, но проверяем еще раз для надежности)
+                    if (existingVideoContainer && existingVideoContainer.parentElement) {
+                        const existingVideo = existingVideoContainer.querySelector('video');
+                        if (existingVideo && existingVideo.srcObject) {
+                            const existingStream = existingVideo.srcObject;
+                            const existingVideoTracks = existingStream.getVideoTracks();
+                            const isScreenShareInContainer = existingVideoTracks.some(track => {
+                                const label = track.label.toLowerCase();
+                                return label.includes('screen') || label.includes('display') || label.includes('window');
+                            });
+                            
+                            if (isScreenShareInContainer) {
+                                // В контейнере пользователя отображается screen share - удаляем его
+                                console.log('[WebRTC] Removing screen share from user container (second check):', targetUid);
+                                existingVideoContainer.remove();
+                                state.displayedVideos.delete(targetUid);
+                            }
+                        }
+                    }
+                }
                 
                 // Запускаем мониторинг качества связи для удаленного пользователя
                 // Запускаем с небольшой задержкой, чтобы соединение успело установиться
@@ -3337,11 +3771,42 @@ async function initApp() {
                             console.log('[WebRTC] Ensuring loader visible before video play for', targetUid);
                         }
                         
+                        // ВАЖНО: Не используем remoteStream напрямую, если он содержит screen share
+                        // Проверяем, содержит ли remoteStream screen share track
+                        const remoteStreamVideoTracks = remoteStream.getVideoTracks();
+                        const remoteStreamHasScreenShare = remoteStreamVideoTracks.some(track => {
+                            const label = track.label.toLowerCase();
+                            return label.includes('screen') || label.includes('display') || label.includes('window');
+                        });
+                        
+                        // Если remoteStream содержит screen share, и это пользователь, который делится экраном,
+                        // не используем remoteStream напрямую - камера должна быть отдельно
+                        if (remoteStreamHasScreenShare && state.currentSharingUser === targetUid) {
+                            console.log('[WebRTC] Remote stream contains screen share for', targetUid, '- not using it directly, camera should be separate');
+                            // Камера должна быть установлена через addVideoStream выше
+                            // Здесь просто проверяем, что video.srcObject не содержит screen share
+                            if (video && video.srcObject) {
+                                const currentStream = video.srcObject;
+                                const currentVideoTracks = currentStream.getVideoTracks();
+                                const currentHasScreenShare = currentVideoTracks.some(track => {
+                                    const label = track.label.toLowerCase();
+                                    return label.includes('screen') || label.includes('display') || label.includes('window');
+                                });
+                                
+                                if (currentHasScreenShare) {
+                                    console.warn('[WebRTC] Video container still has screen share, removing:', targetUid);
+                                    videoContainer.remove();
+                                    state.displayedVideos.delete(targetUid);
+                                }
+                            }
+                            return; // Не продолжаем обработку для screen share stream
+                        }
+                        
                         // Если состояние установлено как enabled ИЛИ не установлено но трек активен
                         if (currentCameraState === true || (!currentCameraState && hasActiveVideo)) {
                             if (video) {
-                                // Убеждаемся, что srcObject установлен
-                                if (video.srcObject !== remoteStream) {
+                                // Убеждаемся, что srcObject установлен (только если это не screen share)
+                                if (video.srcObject !== remoteStream && !remoteStreamHasScreenShare) {
                                     video.srcObject = remoteStream;
                                 }
                                 // Убеждаемся, что аудио не приглушено
@@ -3350,24 +3815,38 @@ async function initApp() {
                                 video.style.zIndex = '2';
                                 // Проверяем, что элемент все еще в DOM перед воспроизведением
                                 if (video.isConnected) {
-                                    // НЕ добавляем задержку - пусть видео загружается естественно
-                                    // Лоадер скроется автоматически в onloadeddata/oncanplay когда данные загрузятся
-                                    video.play().catch(err => {
-                                        // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
-                                        if (err.name !== 'AbortError') {
-                                            console.error('[WebRTC] Error playing video after stream received:', err);
-                                        }
-                                        // Скрываем лоадер при ошибке
-                                        if (loader) {
-                                            loader.style.opacity = '0';
-                                            loader.style.transition = 'opacity 0.3s ease-out';
-                                            setTimeout(() => {
-                                                loader.style.display = 'none';
-                                                loader.style.visibility = 'hidden';
-                                                state.loaderHidden[targetUid] = true;
-                                            }, 300);
-                                        }
-                                    });
+                                    // Оптимизация для мобильных: последовательное воспроизведение
+                                    const deviceType = getDeviceType();
+                                    const isMobile = deviceType.type === 'phone' || deviceType.type === 'tablet';
+                                    const displayedVideosArray = Array.from(state.displayedVideos);
+                                    const videoIndex = displayedVideosArray.indexOf(targetUid);
+                                    const playDelay = isMobile && videoIndex >= 0 ? (videoIndex * 200) : 0;
+                                    
+                                    const playVideo = () => {
+                                        video.play().catch(err => {
+                                            // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
+                                            if (err.name !== 'AbortError') {
+                                                console.error('[WebRTC] Error playing video after stream received:', err);
+                                            }
+                                            // Скрываем лоадер при ошибке
+                                            if (loader) {
+                                                loader.style.opacity = '0';
+                                                loader.style.transition = 'opacity 0.3s ease-out';
+                                                setTimeout(() => {
+                                                    loader.style.display = 'none';
+                                                    loader.style.visibility = 'hidden';
+                                                    state.loaderHidden[targetUid] = true;
+                                                }, 300);
+                                            }
+                                        });
+                                    };
+                                    
+                                    if (playDelay > 0) {
+                                        setTimeout(playVideo, playDelay);
+                                        console.log(`[WebRTC] Delaying video play for ${targetUid} by ${playDelay}ms (mobile optimization)`);
+                                    } else {
+                                        playVideo();
+                                    }
                                 }
                                 console.log('[WebRTC] Showing video for', targetUid, '- camera state:', currentCameraState === true ? 'enabled' : 'not set (track active)');
                             }
@@ -3405,6 +3884,29 @@ async function initApp() {
     function addVideoStream(uid, stream, isLocal) {
         console.log('[Video] Adding video stream for:', uid, 'isLocal:', isLocal);
         
+        // ВАЖНО: Проверяем, не содержит ли stream screen share track
+        // Если содержит и это пользователь, который делится экраном, не добавляем в обычный контейнер
+        const videoTracks = stream.getVideoTracks();
+        const hasScreenShareTrack = videoTracks.some(track => {
+            const label = track.label.toLowerCase();
+            return label.includes('screen') || label.includes('display') || label.includes('window');
+        });
+        
+        if (hasScreenShareTrack && state.currentSharingUser === uid && !isLocal) {
+            console.warn('[Video] Stream contains screen share track for', uid, '- not adding to regular container');
+            // Убеждаемся, что контейнер пользователя не отображает screen share
+            const existingContainer = document.getElementById(`video-${uid}`);
+            if (existingContainer) {
+                const existingVideo = existingContainer.querySelector('video');
+                if (existingVideo && existingVideo.srcObject === stream) {
+                    console.log('[Video] Removing screen share from user container:', uid);
+                    existingContainer.remove();
+                    state.displayedVideos.delete(uid);
+                }
+            }
+            return; // Не добавляем screen share в обычный контейнер
+        }
+        
         // Защита: предотвращаем множественные вызовы для одного пользователя
         // Это критично при подключении 3+ пользователей
         if (state.displayedVideos.has(uid)) {
@@ -3416,6 +3918,26 @@ async function initApp() {
                     // Стрим уже установлен, не обновляем
                     console.log('[Video] Stream already set for', uid, '- skipping update');
                     return;
+                }
+                
+                // ВАЖНО: Проверяем, не содержит ли существующий stream screen share
+                if (existingVideo && existingVideo.srcObject) {
+                    const existingStream = existingVideo.srcObject;
+                    const existingVideoTracks = existingStream.getVideoTracks();
+                    const existingHasScreenShare = existingVideoTracks.some(track => {
+                        const label = track.label.toLowerCase();
+                        return label.includes('screen') || label.includes('display') || label.includes('window');
+                    });
+                    
+                    // Если существующий stream содержит screen share, а новый - камера, заменяем
+                    if (existingHasScreenShare && !hasScreenShareTrack && state.currentSharingUser === uid) {
+                        console.log('[Video] Replacing screen share with camera stream for', uid);
+                        // Продолжаем обновление
+                    } else if (existingHasScreenShare && hasScreenShareTrack) {
+                        // Оба содержат screen share - не обновляем
+                        console.log('[Video] Both streams contain screen share, skipping update for', uid);
+                        return;
+                    }
                 }
                 
                 if (existingVideo) {
@@ -3452,14 +3974,30 @@ async function initApp() {
                                         existingVideo.style.zIndex = '2';
                                     }
                                     
+                                    // Оптимизация для мобильных: последовательное воспроизведение
+                                    const deviceType = getDeviceType();
+                                    const isMobile = deviceType.type === 'phone' || deviceType.type === 'tablet';
+                                    const displayedVideosArray = Array.from(state.displayedVideos);
+                                    const videoIndex = displayedVideosArray.indexOf(uid);
+                                    const playDelay = isMobile && !isLocal && videoIndex >= 0 ? (videoIndex * 200) : 0;
+                                    
                                     // Запускаем воспроизведение только если видео приостановлено
                                     if (existingVideo.paused) {
-                                        state.videoPlayPromises[uid] = existingVideo.play().catch(err => {
-                                            // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
-                                            if (err.name !== 'AbortError') {
-                                                console.error('[Video] Error playing existing video:', err);
-                                            }
-                                        });
+                                        const playVideo = () => {
+                                            state.videoPlayPromises[uid] = existingVideo.play().catch(err => {
+                                                // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
+                                                if (err.name !== 'AbortError') {
+                                                    console.error('[Video] Error playing existing video:', err);
+                                                }
+                                            });
+                                        };
+                                        
+                                        if (playDelay > 0) {
+                                            setTimeout(playVideo, playDelay);
+                                            console.log(`[Video] Delaying video play for ${uid} by ${playDelay}ms (mobile optimization)`);
+                                        } else {
+                                            playVideo();
+                                        }
                                     }
                                 }
                             } else {
@@ -3524,6 +4062,18 @@ async function initApp() {
         video.playsInline = true;
         video.muted = isLocal; // Только локальное видео должно быть приглушено
         video.setAttribute('playsinline', 'true');
+        
+        // Оптимизация для мобильных: добавляем атрибуты для лучшей производительности
+        const deviceType = getDeviceType();
+        const isMobile = deviceType.type === 'phone' || deviceType.type === 'tablet';
+        if (isMobile) {
+            // Для мобильных устройств отключаем некоторые оптимизации браузера
+            video.preload = 'auto';
+            // Добавляем обработчик для оптимизации загрузки
+            video.addEventListener('loadstart', () => {
+                console.log(`[Video] Load started for ${uid} on mobile device`);
+            });
+        }
         // Убеждаемся, что аудио не приглушено для удаленных пользователей
         if (!isLocal) {
             video.muted = false;
@@ -3580,25 +4130,42 @@ async function initApp() {
                     return;
                 }
             }
-            // Просто пытаемся воспроизвести видео
-            // НЕ добавляем задержку - пусть видео загружается естественно
-            // Лоадер скроется автоматически в onloadeddata/oncanplay когда данные загрузятся
-            video.play().catch(err => {
-                console.error('Error playing video:', err);
-                // Скрываем лоадер при ошибке
-                if (!isLocal) {
-                    const loader = videoContainer.querySelector('.video-loader');
-                    if (loader) {
-                        loader.style.opacity = '0';
-                        loader.style.transition = 'opacity 0.3s ease-out';
-                        setTimeout(() => {
-                            loader.style.display = 'none';
-                            loader.style.visibility = 'hidden';
-                            state.loaderHidden[uid] = true;
-                        }, 300);
+            // Оптимизация для мобильных: последовательное воспроизведение видео
+            const deviceType = getDeviceType();
+            const isMobile = deviceType.type === 'phone' || deviceType.type === 'tablet';
+            const displayedVideosArray = Array.from(state.displayedVideos);
+            const videoIndex = displayedVideosArray.indexOf(uid);
+            // Для мобильных устройств добавляем задержку между воспроизведением видео
+            const playDelay = isMobile && !isLocal && videoIndex >= 0 ? (videoIndex * 200) : 0;
+            
+            const playVideo = () => {
+                video.play().catch(err => {
+                    // Игнорируем AbortError - это нормально, если видео было удалено или приостановлено
+                    if (err.name !== 'AbortError') {
+                        console.error('Error playing video:', err);
                     }
-                }
-            });
+                    // Скрываем лоадер при ошибке
+                    if (!isLocal) {
+                        const loader = videoContainer.querySelector('.video-loader');
+                        if (loader) {
+                            loader.style.opacity = '0';
+                            loader.style.transition = 'opacity 0.3s ease-out';
+                            setTimeout(() => {
+                                loader.style.display = 'none';
+                                loader.style.visibility = 'hidden';
+                                state.loaderHidden[uid] = true;
+                            }, 300);
+                        }
+                    }
+                });
+            };
+            
+            if (playDelay > 0) {
+                setTimeout(playVideo, playDelay);
+                console.log(`[Video] Delaying initial video play for ${uid} by ${playDelay}ms (mobile optimization)`);
+            } else {
+                playVideo();
+            }
         };
         
         // Скрываем лоадер только когда видео действительно загрузилось и показывает изображение
@@ -4054,7 +4621,11 @@ async function initApp() {
             icon.style.display = isMuted ? 'flex' : 'none';
             console.log(`[Icons] Updated mic icon for ${userId}: ${isMuted ? 'muted' : 'unmuted'}, iconId: ${iconId}, found: ${!!icon}`);
         } else {
-            console.warn(`[Icons] Mic icon not found for ${userId}, iconId: ${iconId}`);
+            // Контейнер еще не создан - отложим обновление на 100мс
+            // Это нормально при первом подключении пользователя
+            setTimeout(() => {
+                updateMicMutedIcon(userId, isMuted);
+            }, 100);
         }
     }
     
@@ -4364,16 +4935,33 @@ async function initApp() {
     
     // Оптимизация: дебаунсинг для updateVideoLayout
     let layoutUpdateTimer = null;
+    let layoutUpdateInProgress = false;
     let lastLayoutCount = -1;
+    let lastDeviceType = null;
+    let lastContainerSize = null;
+    let lastScreenSharing = null;
     
+    /**
+     * Обновляет layout видео с использованием адаптивной системы
+     */
     function updateVideoLayout() {
         // Отменяем предыдущий таймер, если он есть
         if (layoutUpdateTimer) {
-            clearTimeout(layoutUpdateTimer);
+            cancelAnimationFrame(layoutUpdateTimer);
+            layoutUpdateTimer = null;
+        }
+        
+        // Защита от множественных одновременных вызовов
+        if (layoutUpdateInProgress) {
+            console.log('[Layout] Update already in progress, skipping');
+            return;
         }
         
         // Используем requestAnimationFrame для оптимизации рендеринга
         layoutUpdateTimer = requestAnimationFrame(() => {
+            layoutUpdateInProgress = true;
+            
+            try {
             const videoStreams = domCache.getVideoStreams();
         if (!videoStreams) {
             console.error('[Layout] video-streams element not found!');
@@ -4381,33 +4969,119 @@ async function initApp() {
         }
         
         const count = state.displayedVideos.size;
-            
-            // Оптимизация: обновляем только если количество изменилось
-            if (count === lastLayoutCount) {
+                const deviceInfo = getDeviceType();
+                const containerSize = getContainerSize(videoStreams.parentElement);
+                const isScreenSharing = state.isScreenSharing && state.currentSharingUser;
+                
+                // Оптимизация для мобильных: ограничиваем количество одновременно воспроизводимых видео
+                const isMobile = deviceInfo.type === 'phone' || deviceInfo.type === 'tablet';
+                const MAX_CONCURRENT_VIDEOS_MOBILE = 4; // Максимум 4 видео на мобильных устройствах
+                
+                if (isMobile && count > MAX_CONCURRENT_VIDEOS_MOBILE) {
+                    console.log(`[Layout] Mobile device detected with ${count} videos, limiting to ${MAX_CONCURRENT_VIDEOS_MOBILE} concurrent videos`);
+                    // Приостанавливаем видео для пользователей вне видимой области
+                    const displayedVideosArray = Array.from(state.displayedVideos);
+                    displayedVideosArray.forEach((uid, index) => {
+                        const videoContainer = document.getElementById(`video-${uid}`);
+                        if (videoContainer) {
+                            const video = videoContainer.querySelector('video');
+                            if (video && index >= MAX_CONCURRENT_VIDEOS_MOBILE) {
+                                // Приостанавливаем видео для пользователей вне лимита
+                                if (!video.paused) {
+                                    video.pause();
+                                    console.log(`[Layout] Paused video for ${uid} (mobile optimization, index ${index})`);
+                                }
+                            } else if (video && index < MAX_CONCURRENT_VIDEOS_MOBILE && video.paused) {
+                                // Возобновляем видео для пользователей в лимите
+                                video.play().catch(err => {
+                                    if (err.name !== 'AbortError') {
+                                        console.error(`[Layout] Error resuming video for ${uid}:`, err);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                // Проверяем, нужно ли обновлять layout
+                const shouldUpdate = 
+                    count !== lastLayoutCount ||
+                    JSON.stringify(deviceInfo) !== JSON.stringify(lastDeviceType) ||
+                    JSON.stringify(containerSize) !== JSON.stringify(lastContainerSize) ||
+                    isScreenSharing !== lastScreenSharing;
+                
+                if (!shouldUpdate) {
                 return;
             }
+                
             lastLayoutCount = count;
+                lastDeviceType = deviceInfo;
+                lastContainerSize = containerSize;
+                lastScreenSharing = isScreenSharing;
             
-        console.log('[Layout] Updating video layout for', count, 'users');
-        
-            // Оптимизация: используем classList для более эффективного обновления
-        videoStreams.className = 'video-streams';
-        
-        if (count === 1) {
-            videoStreams.classList.add('single-user');
-        } else if (count === 2) {
-            videoStreams.classList.add('two-users');
-        } else if (count <= 4) {
-            videoStreams.classList.add('multiple-users');
+            console.log('[Layout] Updating adaptive video layout for', count, 'users', {
+                device: deviceInfo,
+                containerSize,
+                isScreenSharing
+            });
+            
+            // Вычисляем layout
+            const layoutConfig = calculateGridLayout(
+                count,
+                deviceInfo,
+                containerSize,
+                isScreenSharing
+            );
+            
+                // Применяем layout
+                applyLayout(videoStreams, layoutConfig, isScreenSharing);
+                
+                // Если режим screen sharing, создаем специальную структуру
+                if (isScreenSharing) {
+                    setupScreenShareLayout(videoStreams, layoutConfig);
         } else {
-            videoStreams.classList.add('many-users');
+                    // Убираем структуру screen sharing если она была
+                    // ВАЖНО: сначала очищаем, потом применяем layout
+                    cleanupScreenShareLayout(videoStreams);
+                    
+                    // Проверяем, что screen share контейнер действительно удален
+                    const remainingScreenShare = videoStreams.querySelector('.screen-share-container');
+                    if (remainingScreenShare) {
+                        console.warn('[ScreenShare] Screen share container still exists, forcing removal');
+                        // Принудительно удаляем все дочерние элементы
+                        while (remainingScreenShare.firstChild) {
+                            const child = remainingScreenShare.firstChild;
+                            if (child.tagName === 'VIDEO' && child.srcObject) {
+                                const stream = child.srcObject;
+                                stream.getTracks().forEach(track => track.stop());
+                                child.srcObject = null;
+                            }
+                            remainingScreenShare.removeChild(child);
+                        }
+                        remainingScreenShare.remove();
+                    }
+                    
+                    // Проверяем наличие screen-share-video элементов
+                    const remainingScreenShareVideos = videoStreams.querySelectorAll('.screen-share-video');
+                    remainingScreenShareVideos.forEach(videoContainer => {
+                        const video = videoContainer.querySelector('video');
+                        if (video && video.srcObject) {
+                            const stream = video.srcObject;
+                            stream.getTracks().forEach(track => track.stop());
+                            video.srcObject = null;
+                        }
+                        videoContainer.remove();
+                    });
+                    
+                    // Применяем обычный grid layout для восстановления размеров
+                    applyGridLayout(videoStreams, layoutConfig);
         }
         
         // Скрывать хедер на мобильных устройствах при большом количестве пользователей
             const roomHeader = domCache.getRoomHeader();
         if (roomHeader) {
-            const isMobile = window.innerWidth <= 768;
-            const isTablet = window.innerWidth <= 1024;
+                    const isMobile = deviceInfo.type === 'phone';
+                    const isTablet = deviceInfo.type === 'tablet';
             
             if (isMobile && count > 2) {
                 roomHeader.classList.add('hidden');
@@ -4418,8 +5092,471 @@ async function initApp() {
             }
         }
         
-        console.log('[Layout] Video layout updated, classes:', videoStreams.className);
+                console.log('[Layout] Adaptive video layout updated', layoutConfig);
+            } finally {
+                layoutUpdateInProgress = false;
+                layoutUpdateTimer = null;
+            }
         });
+    }
+    
+    /**
+     * Настраивает layout для режима демонстрации экрана
+     * Создает отдельный контейнер для screen share, камера пользователя остается на месте
+     * Работает для всех устройств: desktop, tablet, phone
+     */
+    function setupScreenShareLayout(container, layoutConfig) {
+        if (!state.currentSharingUser) {
+            console.warn('[ScreenShare] setupScreenShareLayout called but currentSharingUser is not set');
+            return;
+        }
+        
+        console.log('[ScreenShare] Setting up screen share layout for user:', state.currentSharingUser, 'device:', getDeviceType());
+        
+        // Убеждаемся, что контейнер в режиме screen sharing
+        if (!container.classList.contains('screen-share-mode')) {
+            container.classList.add('screen-share-mode');
+            console.log('[ScreenShare] Added screen-share-mode class to container');
+        }
+        
+        // Применяем правильные CSS классы для направления панели участников
+        const deviceInfo = getDeviceType();
+        if (layoutConfig.participantsPanel) {
+            if (layoutConfig.participantsPanel.direction === 'vertical') {
+                container.classList.add('participants-vertical');
+                container.classList.remove('participants-horizontal');
+            } else {
+                container.classList.add('participants-horizontal');
+                container.classList.remove('participants-vertical');
+            }
+            console.log('[ScreenShare] Participants panel direction:', layoutConfig.participantsPanel.direction);
+        }
+        
+        // Создаем контейнер для экрана демонстрации (отдельный, не используем камеру пользователя)
+        let screenShareContainer = container.querySelector('.screen-share-container');
+        if (!screenShareContainer) {
+            screenShareContainer = document.createElement('div');
+            screenShareContainer.className = 'screen-share-container';
+            container.insertBefore(screenShareContainer, container.firstChild);
+            console.log('[ScreenShare] Created screen-share-container');
+        } else {
+            console.log('[ScreenShare] Screen-share-container already exists');
+        }
+        
+        // Проверяем, есть ли уже контейнер для screen share видео
+        let screenShareVideoContainer = screenShareContainer.querySelector('.video-container.screen-share-video');
+        if (!screenShareVideoContainer) {
+            // Создаем новый контейнер для screen share
+            screenShareVideoContainer = document.createElement('div');
+            screenShareVideoContainer.className = 'video-container screen-share-video';
+            screenShareVideoContainer.id = `screen-share-${state.currentSharingUser}`;
+            
+            // Создаем video элемент для screen share
+            const videoElement = document.createElement('video');
+            videoElement.autoplay = true;
+            videoElement.playsInline = true;
+            videoElement.muted = true; // Локально всегда muted
+            videoElement.className = 'video-player';
+            screenShareVideoContainer.appendChild(videoElement);
+            
+            // Добавляем username wrapper
+            const usernameWrapper = document.createElement('div');
+            usernameWrapper.className = 'username-wrapper';
+            usernameWrapper.textContent = state.userNames[state.currentSharingUser] || `User ${state.currentSharingUser}`;
+            screenShareVideoContainer.appendChild(usernameWrapper);
+            
+            screenShareContainer.appendChild(screenShareVideoContainer);
+            
+            // Получаем stream для screen share и устанавливаем его
+            if (state.currentSharingUser === state.uid && state.screenShareStream) {
+                // Локальный screen share - используем screenShareStream напрямую
+                // Создаем новый stream только с screen share track
+                const screenShareOnlyStream = new MediaStream([state.screenShareTrack]);
+                if (state.screenAudioTrack) {
+                    screenShareOnlyStream.addTrack(state.screenAudioTrack);
+                }
+                videoElement.srcObject = screenShareOnlyStream;
+                videoElement.play().catch(err => console.error('[ScreenShare] Error playing local screen share:', err));
+                console.log('[ScreenShare] Set local screen share stream in container');
+            } else {
+                // Удаленный screen share - ищем stream в peer connections
+                const peerConnection = state.peerConnections[state.currentSharingUser];
+                if (peerConnection) {
+                    // Получаем stream из peer connection (screen share track)
+                    let screenShareTrackFound = false;
+                    peerConnection.getReceivers().forEach(receiver => {
+                        if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState === 'live') {
+                            // Проверяем, что это screen share track (не камера)
+                            const trackLabel = receiver.track.label.toLowerCase();
+                            if (trackLabel.includes('screen') || trackLabel.includes('display') || trackLabel.includes('window')) {
+                                const stream = new MediaStream([receiver.track]);
+                                // Добавляем аудио треки, если есть
+                                peerConnection.getReceivers().forEach(audioReceiver => {
+                                    if (audioReceiver.track && audioReceiver.track.kind === 'audio' && audioReceiver.track.readyState === 'live') {
+                                        stream.addTrack(audioReceiver.track);
+                                    }
+                                });
+                                videoElement.pause();
+                                videoElement.srcObject = stream;
+                                videoElement.muted = false; // Для удаленного не muted
+                                setTimeout(() => {
+                                    videoElement.play().catch(err => {
+                                        if (err.name !== 'AbortError') {
+                                            console.error('[ScreenShare] Error playing remote screen share:', err);
+                                        }
+                                    });
+                                }, 50);
+                                console.log('[ScreenShare] Set remote screen share stream for user:', state.currentSharingUser);
+                                screenShareTrackFound = true;
+                            }
+                        }
+                    });
+                    
+                    if (!screenShareTrackFound) {
+                        console.warn('[ScreenShare] Screen share track not found in peer connection for user:', state.currentSharingUser);
+                        // Попробуем найти в remoteStreams
+                        if (state.remoteStreams && state.remoteStreams[state.currentSharingUser]) {
+                            const remoteStream = state.remoteStreams[state.currentSharingUser];
+                            const videoTracks = remoteStream.getVideoTracks();
+                            const screenShareTracks = videoTracks.filter(track => {
+                                const label = track.label.toLowerCase();
+                                return label.includes('screen') || label.includes('display') || label.includes('window');
+                            });
+                            
+                            if (screenShareTracks.length > 0) {
+                                const screenShareStream = new MediaStream(screenShareTracks);
+                                const audioTracks = remoteStream.getAudioTracks();
+                                audioTracks.forEach(track => screenShareStream.addTrack(track));
+                                videoElement.pause();
+                                videoElement.srcObject = screenShareStream;
+                                videoElement.muted = false;
+                                setTimeout(() => {
+                                    videoElement.play().catch(err => {
+                                        if (err.name !== 'AbortError') {
+                                            console.error('[ScreenShare] Error playing remote screen share from remoteStreams:', err);
+                                        }
+                                    });
+                                }, 50);
+                                console.log('[ScreenShare] Set remote screen share stream from remoteStreams for user:', state.currentSharingUser);
+                            }
+                        }
+                    }
+                } else {
+                    console.warn('[ScreenShare] Peer connection not found for user:', state.currentSharingUser);
+                    // Если peer connection еще не создан, попробуем позже
+                    setTimeout(() => {
+                        const retryPeerConnection = state.peerConnections[state.currentSharingUser];
+                        if (retryPeerConnection && !videoElement.srcObject) {
+                            // Повторяем попытку установки stream
+                            retryPeerConnection.getReceivers().forEach(receiver => {
+                                if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState === 'live') {
+                                    const trackLabel = receiver.track.label.toLowerCase();
+                                    if (trackLabel.includes('screen') || trackLabel.includes('display') || trackLabel.includes('window')) {
+                                        const stream = new MediaStream([receiver.track]);
+                                        retryPeerConnection.getReceivers().forEach(audioReceiver => {
+                                            if (audioReceiver.track && audioReceiver.track.kind === 'audio' && audioReceiver.track.readyState === 'live') {
+                                                stream.addTrack(audioReceiver.track);
+                                            }
+                                        });
+                                        videoElement.srcObject = stream;
+                                        videoElement.muted = false;
+                                        videoElement.play().catch(err => {
+                                            if (err.name !== 'AbortError') {
+                                                console.error('[ScreenShare] Error playing remote screen share on retry:', err);
+                                            }
+                                        });
+                                        console.log('[ScreenShare] Set remote screen share stream on retry for user:', state.currentSharingUser);
+                                    }
+                                }
+                            });
+                        }
+                    }, 1000);
+                }
+            }
+        }
+        
+        // Создаем панель участников
+        let participantsPanel = container.querySelector('.participants-panel');
+        if (!participantsPanel) {
+            participantsPanel = document.createElement('div');
+            participantsPanel.className = 'participants-panel';
+            if (layoutConfig.participantsPanel?.scrollable) {
+                participantsPanel.classList.add('participants-scrollable');
+            }
+            container.appendChild(participantsPanel);
+        }
+        
+        // Перемещаем ВСЕ видео (включая камеру пользователя) в панель участников
+        // Камера пользователя остается квадратной 1:1
+        const allVideos = Array.from(container.querySelectorAll('.video-container:not(.screen-share-video)'));
+        allVideos.forEach(videoContainer => {
+            const uid = videoContainer.id.replace('video-', '');
+            
+            // ВАЖНО: Если это камера пользователя, который делится экраном, обновляем её stream
+            // Для локального пользователя используем cameraStream, для удаленного - проверяем, что это не screen share
+            if (uid === state.currentSharingUser) {
+                // Это пользователь, который делится экраном - убеждаемся, что в его контейнере камера, а не screen share
+                const video = videoContainer.querySelector('video');
+                if (video) {
+                    let needsUpdate = false;
+                    let cameraStreamToUse = null;
+                    
+                    if (video.srcObject) {
+                        const stream = video.srcObject;
+                        const videoTracks = stream.getVideoTracks();
+                        const isScreenShare = videoTracks.some(track => {
+                            const label = track.label.toLowerCase();
+                            return label.includes('screen') || label.includes('display') || label.includes('window');
+                        });
+                        
+                        if (isScreenShare) {
+                            // В контейнере пользователя screen share - нужно заменить на камеру
+                            console.log('[ScreenShare] User', uid, 'container has screen share, need to replace with camera');
+                            needsUpdate = true;
+                        }
+                    } else {
+                        // Если нет srcObject, нужно установить камеру
+                        needsUpdate = true;
+                    }
+                    
+                    if (needsUpdate) {
+                        // Если это локальный пользователь, используем cameraStream
+                        if (uid === state.uid && state.cameraStream && state.cameraStream.getVideoTracks().length > 0) {
+                            cameraStreamToUse = state.cameraStream;
+                            console.log('[ScreenShare] Using cameraStream for local user');
+                        } else if (uid !== state.uid) {
+                            // Для удаленного пользователя ищем камеру в peer connection
+                            const peerConnection = state.peerConnections[uid];
+                            if (peerConnection) {
+                                const cameraTracks = [];
+                                peerConnection.getReceivers().forEach(receiver => {
+                                    if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState === 'live') {
+                                        const trackLabel = receiver.track.label.toLowerCase();
+                                        if (!trackLabel.includes('screen') && !trackLabel.includes('display') && !trackLabel.includes('window')) {
+                                            cameraTracks.push(receiver.track);
+                                        }
+                                    }
+                                });
+                                
+                                if (cameraTracks.length > 0) {
+                                    cameraStreamToUse = new MediaStream(cameraTracks);
+                                    // Добавляем аудио треки
+                                    peerConnection.getReceivers().forEach(receiver => {
+                                        if (receiver.track && receiver.track.kind === 'audio' && receiver.track.readyState === 'live') {
+                                            cameraStreamToUse.addTrack(receiver.track);
+                                        }
+                                    });
+                                    console.log('[ScreenShare] Created cameraStream from peer connection for remote user:', uid);
+                                } else {
+                                    // Если камера не найдена в peer connection, проверяем remoteStreams
+                                    if (state.remoteStreams && state.remoteStreams[uid]) {
+                                        const remoteStream = state.remoteStreams[uid];
+                                        const videoTracks = remoteStream.getVideoTracks();
+                                        const cameraTracksFromRemote = videoTracks.filter(track => {
+                                            const label = track.label.toLowerCase();
+                                            return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+                                        });
+                                        
+                                        if (cameraTracksFromRemote.length > 0) {
+                                            cameraStreamToUse = new MediaStream(cameraTracksFromRemote);
+                                            const audioTracks = remoteStream.getAudioTracks();
+                                            audioTracks.forEach(track => {
+                                                const trackLabel = track.label.toLowerCase();
+                                                if (!trackLabel.includes('screen') && !trackLabel.includes('display')) {
+                                                    cameraStreamToUse.addTrack(track);
+                                                }
+                                            });
+                                            console.log('[ScreenShare] Created cameraStream from remoteStreams for remote user:', uid);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (cameraStreamToUse && cameraStreamToUse.getVideoTracks().length > 0) {
+                            video.pause();
+                            video.srcObject = cameraStreamToUse;
+                            video.muted = uid === state.uid; // Локальный muted, удаленный не muted
+                            setTimeout(() => {
+                                video.play().catch(err => {
+                                    if (err.name !== 'AbortError') {
+                                        console.error('[ScreenShare] Error playing camera stream:', err);
+                                    }
+                                });
+                            }, 50);
+                            console.log('[ScreenShare] Replaced screen share with camera stream for user:', uid);
+                        } else {
+                            console.warn('[ScreenShare] No camera stream available for user:', uid);
+                        }
+                    }
+                }
+            }
+            
+            // ВАЖНО: Если это камера локального пользователя, обновляем её stream на cameraStream (без screen share)
+            // Это критично для мобильных устройств, чтобы камера не заменялась на screen share
+            if (uid === state.uid) {
+                const video = videoContainer.querySelector('video');
+                if (video) {
+                    // Если cameraStream существует и содержит видео треки, используем его
+                    if (state.cameraStream && state.cameraStream.getVideoTracks().length > 0) {
+                        const currentStream = video.srcObject;
+                        const needsUpdate = !currentStream || 
+                                          currentStream !== state.cameraStream ||
+                                          state.cameraStream.getVideoTracks().length !== (currentStream.getVideoTracks?.()?.length || 0);
+                        
+                        if (needsUpdate) {
+                            // Останавливаем предыдущий play() если он есть
+                            video.pause();
+                            // Обновляем stream на камеру (без screen share)
+                            video.srcObject = state.cameraStream;
+                            // Используем небольшую задержку для избежания AbortError
+                            setTimeout(() => {
+                                video.play().catch(err => {
+                                    // Игнорируем AbortError - это нормально при быстрых обновлениях
+                                    if (err.name !== 'AbortError') {
+                                        console.error('[ScreenShare] Error playing camera stream:', err);
+                                    }
+                                });
+                            }, 50);
+                            console.log('[ScreenShare] Updated user camera container with camera stream (without screen share)');
+                        }
+                    } else {
+                        // Если cameraStream пустой, но есть localStream, проверяем что это не screen share
+                        if (state.localStream) {
+                            const videoTracks = state.localStream.getVideoTracks();
+                            const cameraTrack = videoTracks.find(track => {
+                                const label = track.label.toLowerCase();
+                                return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+                            });
+                            
+                            // Если есть камера в localStream, создаем cameraStream
+                            if (cameraTrack) {
+                                const audioTracks = state.localStream.getAudioTracks().filter(track => {
+                                    return track !== state.screenAudioTrack && 
+                                           track !== state.mixedAudioStream?.getAudioTracks()[0];
+                                });
+                                state.cameraStream = new MediaStream([cameraTrack, ...audioTracks]);
+                                video.srcObject = state.cameraStream;
+                                video.play().catch(err => {
+                                    if (err.name !== 'AbortError') {
+                                        console.error('[ScreenShare] Error playing camera stream:', err);
+                                    }
+                                });
+                                console.log('[ScreenShare] Created cameraStream from localStream for user display');
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Перемещаем видео в панель участников
+            if (videoContainer.parentElement !== participantsPanel &&
+                videoContainer.parentElement !== screenShareContainer) {
+                participantsPanel.appendChild(videoContainer);
+            }
+        });
+        
+        console.log('[ScreenShare] Setup completed - screen share container and participants panel created');
+    }
+    
+    /**
+     * Убирает структуру screen sharing layout
+     * Удаляет отдельный контейнер для screen share, возвращает все видео в основной контейнер
+     */
+    function cleanupScreenShareLayout(container) {
+        if (!container) return;
+        
+        console.log('[ScreenShare] Cleaning up screen share layout');
+        
+        // Находим все элементы screen share
+        const screenShareContainer = container.querySelector('.screen-share-container');
+        const participantsPanel = container.querySelector('.participants-panel');
+        const screenShareVideos = container.querySelectorAll('.screen-share-video');
+        
+        // Удаляем контейнер screen share полностью (он был создан отдельно)
+        if (screenShareContainer) {
+            console.log('[ScreenShare] Removing screen share container');
+            
+            // Останавливаем все треки во всех video элементах в контейнере
+            const allVideos = screenShareContainer.querySelectorAll('video');
+            allVideos.forEach(video => {
+                if (video.srcObject) {
+                    const stream = video.srcObject;
+                    stream.getTracks().forEach(track => {
+                        console.log('[ScreenShare] Stopping track:', track.kind, track.id);
+                        track.stop();
+                    });
+                    video.srcObject = null;
+                }
+                // Очищаем video элемент
+                video.pause();
+                video.removeAttribute('src');
+                video.removeAttribute('srcObject');
+            });
+            
+            // Удаляем все дочерние элементы
+            while (screenShareContainer.firstChild) {
+                screenShareContainer.removeChild(screenShareContainer.firstChild);
+            }
+            
+            // Удаляем сам контейнер
+            screenShareContainer.remove();
+            console.log('[ScreenShare] Screen share container removed');
+        }
+        
+        // Удаляем все оставшиеся screen-share-video элементы (на случай если они не были в контейнере)
+        screenShareVideos.forEach(videoContainer => {
+            const video = videoContainer.querySelector('video');
+            if (video && video.srcObject) {
+                const stream = video.srcObject;
+                stream.getTracks().forEach(track => {
+                    track.stop();
+                });
+                video.srcObject = null;
+            }
+            videoContainer.remove();
+        });
+        
+        // Возвращаем все видео из панели участников обратно в основной контейнер
+        if (participantsPanel) {
+            console.log('[ScreenShare] Returning videos from participants panel');
+            const videos = Array.from(participantsPanel.querySelectorAll('.video-container'));
+            videos.forEach(video => {
+                // Убираем все inline стили для восстановления квадратного формата
+                video.style.width = '';
+                video.style.height = '';
+                video.style.aspectRatio = '';
+                video.style.maxWidth = '';
+                video.style.maxHeight = '';
+                video.style.flexBasis = '';
+                
+                // Восстанавливаем video элемент внутри контейнера
+                const videoElement = video.querySelector('video');
+                if (videoElement) {
+                    videoElement.style.aspectRatio = '';
+                    videoElement.style.objectFit = 'cover';
+                }
+                
+                container.appendChild(video);
+            });
+            participantsPanel.remove();
+            console.log('[ScreenShare] Participants panel removed');
+        }
+        
+        // Убираем класс screen-share-mode с контейнера
+        container.classList.remove('screen-share-mode');
+        container.classList.remove('participants-vertical');
+        container.classList.remove('participants-horizontal');
+        
+        // Убираем все CSS переменные связанные со screen share
+        container.style.removeProperty('--screen-share-width');
+        container.style.removeProperty('--screen-share-height');
+        container.style.removeProperty('--participants-panel-width');
+        container.style.removeProperty('--participants-panel-height');
+        container.style.removeProperty('--participants-video-size');
+        container.style.removeProperty('--participants-gap');
+        
+        console.log('[ScreenShare] Cleanup completed');
     }
     
     // Оптимизация: throttling для resize события
@@ -4919,16 +6056,93 @@ async function initApp() {
     }
     
     async function toggleCamera() {
+        // ВАЖНО: Если включен screen share, кнопка камеры не должна его останавливать
+        if (state.isScreenSharing && state.currentSharingUser === state.uid) {
+            // Во время screen share камера управляется отдельно через cameraStream
+            // Проверяем состояние камеры в cameraStream
+            const cameraVideoTracks = state.cameraStream ? state.cameraStream.getVideoTracks() : [];
+            const newState = cameraVideoTracks.length === 0 || !cameraVideoTracks[0]?.enabled;
+            
+            if (newState && (cameraVideoTracks.length === 0 || cameraVideoTracks[0].readyState === 'ended')) {
+                // Включаем камеру во время screen share
+                try {
+                    const newStream = await navigator.mediaDevices.getUserMedia({
+                        video: true,
+                        audio: false // Аудио уже в localStream
+                    });
+                    
+                    // Обновляем cameraStream для отображения камеры
+                    const videoTrack = newStream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        const audioTracks = state.localStream ? state.localStream.getAudioTracks().filter(track => {
+                            return track !== state.screenAudioTrack && 
+                                   track !== state.mixedAudioStream?.getAudioTracks()[0];
+                        }) : [];
+                        state.cameraStream = new MediaStream([videoTrack, ...audioTracks]);
+                        state.isVideoEnabled = true;
+                        state.userCameraStates[state.uid] = true;
+                        updateVideoDisplay(state.uid, state.cameraStream);
+                        console.log('[Controls] Camera enabled during screen share');
+                    }
+                    
+                    // Останавливаем новый поток (треки уже в cameraStream)
+                    newStream.getTracks().forEach(track => track.stop());
+                    
+                    updateControlButtons();
+                    
+                    // Отправляем сообщение другим пользователям
+                    if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                        state.videoSocket.send(JSON.stringify({
+                            type: 'camera-enabled',
+                            from: state.uid,
+                            room: state.roomName
+                        }));
+                    }
+                } catch (error) {
+                    console.error('[Controls] Error enabling camera during screen share:', error);
+                    alert('Не удалось включить камеру. Пожалуйста, проверьте разрешения браузера.');
+                }
+            } else if (cameraVideoTracks.length > 0) {
+                // Переключаем состояние камеры (включить/выключить)
+                const newState = !cameraVideoTracks[0].enabled;
+                cameraVideoTracks.forEach(track => {
+                    track.enabled = newState;
+                });
+                state.isVideoEnabled = newState;
+                state.userCameraStates[state.uid] = newState;
+                updateVideoDisplay(state.uid, state.cameraStream);
+                updateControlButtons();
+                
+                // Отправляем сообщение другим пользователям
+                if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                    state.videoSocket.send(JSON.stringify({
+                        type: newState ? 'camera-enabled' : 'camera-disabled',
+                        from: state.uid,
+                        room: state.roomName
+                    }));
+                }
+                console.log('[Controls] Camera toggled during screen share, enabled:', state.isVideoEnabled);
+            }
+            return; // ВАЖНО: Выходим из функции, не трогая screen share
+        }
+        
+        // Обычная логика для камеры (когда screen share не активен)
         const videoTracks = state.localStream ? state.localStream.getVideoTracks() : [];
         const newState = videoTracks.length === 0 || !videoTracks[0].enabled;
         
         // Если включаем камеру и трек в состоянии "ended" или его нет, получаем новый поток
         if (newState && (videoTracks.length === 0 || videoTracks[0].readyState === 'ended')) {
             try {
-                // Останавливаем старые треки если есть
+                // Останавливаем старые треки если есть (только камеру, не screen share)
                 if (state.localStream) {
                     const oldVideoTracks = state.localStream.getVideoTracks();
-                    oldVideoTracks.forEach(track => track.stop());
+                    oldVideoTracks.forEach(track => {
+                        // НЕ останавливаем screen share треки
+                        const label = track.label.toLowerCase();
+                        if (!label.includes('screen') && !label.includes('display') && !label.includes('window')) {
+                            track.stop();
+                        }
+                    });
                 }
                 
                 // Получаем новый поток с камерой
@@ -4939,11 +6153,15 @@ async function initApp() {
                 
                 // Заменяем видео треки в существующем потоке
                 if (state.localStream) {
-                    // Удаляем старые видео треки
+                    // Удаляем только камеру, НЕ screen share
                     const oldVideoTracks = state.localStream.getVideoTracks();
                     oldVideoTracks.forEach(track => {
+                        const label = track.label.toLowerCase();
+                        // Удаляем только камеру, не screen share
+                        if (!label.includes('screen') && !label.includes('display') && !label.includes('window')) {
                         state.localStream.removeTrack(track);
                         track.stop();
+                        }
                     });
                     
                     // Добавляем новые видео треки
@@ -4977,7 +6195,11 @@ async function initApp() {
                         const senders = pc.getSenders();
                         const videoSender = senders.find(s => s.track && s.track.kind === 'video');
                         if (videoSender) {
-                            const newVideoTrack = state.localStream.getVideoTracks()[0];
+                            // Находим камеру (не screen share)
+                            const newVideoTrack = state.localStream.getVideoTracks().find(track => {
+                                const label = track.label.toLowerCase();
+                                return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+                            });
                             if (newVideoTrack) {
                                 videoSender.replaceTrack(newVideoTrack).catch(err => {
                                     console.error('[Controls] Error replacing video track:', err);
@@ -5006,9 +6228,45 @@ async function initApp() {
                 alert('Не удалось включить камеру. Пожалуйста, проверьте разрешения браузера.');
             }
         } else if (state.localStream && videoTracks.length > 0) {
-            // Просто переключаем состояние трека
-            const newState = !videoTracks[0].enabled;
-            videoTracks.forEach(track => {
+            // ВАЖНО: Если включен screen share, работаем только с cameraStream
+            if (state.isScreenSharing && state.currentSharingUser === state.uid) {
+                // Во время screen share переключаем только камеру в cameraStream
+                const cameraVideoTracks = state.cameraStream ? state.cameraStream.getVideoTracks() : [];
+                if (cameraVideoTracks.length > 0) {
+                    const newState = !cameraVideoTracks[0].enabled;
+                    cameraVideoTracks.forEach(track => {
+                        track.enabled = newState;
+                    });
+                    state.isVideoEnabled = newState;
+                    state.userCameraStates[state.uid] = newState;
+                    updateVideoDisplay(state.uid, state.cameraStream);
+                    updateControlButtons();
+                    
+                    // Отправляем сообщение другим пользователям
+                    if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
+                        state.videoSocket.send(JSON.stringify({
+                            type: newState ? 'camera-enabled' : 'camera-disabled',
+                            from: state.uid,
+                            room: state.roomName
+                        }));
+                    }
+                    console.log('[Controls] Camera toggled during screen share, enabled:', state.isVideoEnabled);
+                } else {
+                    console.warn('[Controls] No camera tracks in cameraStream during screen share');
+                }
+                return; // ВАЖНО: Выходим, не трогая screen share
+            }
+            
+            // Обычная логика переключения камеры (когда screen share не активен)
+            // Находим только камеру (не screen share)
+            const cameraTracks = videoTracks.filter(track => {
+                const label = track.label.toLowerCase();
+                return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+            });
+            
+            if (cameraTracks.length > 0) {
+                const newState = !cameraTracks[0].enabled;
+                cameraTracks.forEach(track => {
                 track.enabled = newState;
             });
             state.isVideoEnabled = newState;
@@ -5028,6 +6286,9 @@ async function initApp() {
                     room: state.roomName
                 }));
                 console.log('[Controls] Sent camera state to other users:', state.isVideoEnabled ? 'enabled' : 'disabled');
+                }
+            } else {
+                console.warn('[Controls] No camera tracks found in local stream');
             }
         } else {
             console.warn('[Controls] No local stream or video tracks available');
@@ -5251,13 +6512,60 @@ async function initApp() {
                 console.warn('[ScreenShare] ⚠️ No audio track available (neither microphone nor screen audio)');
             }
             
-            // Сначала обновляем локальный стрим (чтобы трек был доступен для peer connections)
+            // ВАЖНО: Сохраняем камеру пользователя ОТДЕЛЬНО ПЕРЕД заменой на screen share
+            // Камера должна оставаться на месте, а screen share будет в отдельном контейнере
+            // Это критично для мобильных устройств!
             if (state.localStream) {
-                // Удаляем старые видео треки
+                const oldVideoTracks = state.localStream.getVideoTracks();
+                // Сохраняем камеру пользователя (если есть) для отображения в панели участников
+                const cameraVideoTrack = oldVideoTracks.find(track => {
+                    const label = track.label.toLowerCase();
+                    // Это камера, а не screen share
+                    return !label.includes('screen') && !label.includes('display') && !label.includes('window');
+                });
+                
+                if (cameraVideoTrack) {
+                    // Создаем отдельный стрим для камеры пользователя
+                    // ВАЖНО: НЕ останавливаем трек камеры, только клонируем ссылки
+                    const cameraAudioTracks = state.localStream.getAudioTracks().filter(track => {
+                        // Исключаем screen audio и mixed audio
+                        return track !== state.screenAudioTrack && 
+                               track !== state.mixedAudioStream?.getAudioTracks()[0];
+                    });
+                    state.cameraStream = new MediaStream([cameraVideoTrack, ...cameraAudioTracks]);
+                    console.log('[ScreenShare] ✅ Saved camera stream for user display BEFORE updating localStream:', {
+                        videoTracks: 1,
+                        audioTracks: cameraAudioTracks.length,
+                        cameraTrackId: cameraVideoTrack.id
+                    });
+                    
+                    // ВАЖНО: Сразу обновляем отображение камеры пользователя с cameraStream
+                    // Это предотвращает замену камеры на screen share
+                    updateVideoDisplay(state.uid, state.cameraStream);
+                    console.log('[ScreenShare] Updated user camera display immediately with cameraStream');
+                } else {
+                    // Если камеры нет, создаем пустой стрим
+                    state.cameraStream = new MediaStream();
+                    console.log('[ScreenShare] ⚠️ No camera track found, created empty cameraStream');
+                }
+            } else {
+                // Если localStream не существует, создаем пустой cameraStream
+                state.cameraStream = new MediaStream();
+                console.log('[ScreenShare] ⚠️ No localStream, created empty cameraStream');
+            }
+            
+            // Теперь обновляем localStream - удаляем старые треки и добавляем screen share
+            if (state.localStream) {
+                // Удаляем старые видео треки из localStream (но не останавливаем камеру)
                 const oldVideoTracks = state.localStream.getVideoTracks();
                 oldVideoTracks.forEach(track => {
                     state.localStream.removeTrack(track);
+                    // НЕ останавливаем камеру - она будет использоваться в cameraStream
+                    const label = track.label.toLowerCase();
+                    if (label.includes('screen') || label.includes('display') || label.includes('window')) {
+                        // Останавливаем только screen share треки
                     track.stop();
+                    }
                 });
                 
                 // Удаляем старые аудио треки
@@ -5298,6 +6606,8 @@ async function initApp() {
                 }
             } else {
                 // Создаем новый стрим с экраном
+                // ВАЖНО: Если камера была сохранена, она уже в cameraStream
+                // Не добавляем камеру в localStream - она должна остаться в cameraStream
                 const tracks = [state.screenShareTrack];
                 if (mixedAudioTrack) {
                     tracks.push(mixedAudioTrack);
@@ -5307,7 +6617,7 @@ async function initApp() {
                     console.log('[ScreenShare] ✅ Added screen audio track to new stream');
                 }
                 state.localStream = new MediaStream(tracks);
-                console.log('[ScreenShare] Created new local stream with', tracks.length, 'tracks');
+                console.log('[ScreenShare] Created new local stream with', tracks.length, 'tracks (camera is in cameraStream)');
             }
             
             // Теперь заменяем видео и аудио треки во всех peer connections и переинициируем переговоры
@@ -5331,8 +6641,14 @@ async function initApp() {
                 console.warn('[ScreenShare] ⚠️ No audio track to send to peers');
             }
             
-            // Обновляем отображение
-            updateVideoDisplay(state.uid, state.localStream);
+            // ВАЖНО: НЕ обновляем камеру пользователя здесь - она уже обновлена выше
+            // Если cameraStream был создан, отображение уже обновлено
+            // НЕ вызываем updateVideoDisplay(state.uid, state.localStream) - это заменит камеру на screen share!
+            if (state.cameraStream && state.cameraStream.getVideoTracks().length > 0) {
+                console.log('[ScreenShare] Camera already updated with cameraStream, skipping update');
+            } else {
+                console.log('[ScreenShare] ⚠️ Camera stream is empty, user camera will not be displayed');
+            }
             
             // Отправляем запрос на сервер
             if (state.videoSocket && state.videoSocket.readyState === WebSocket.OPEN) {
@@ -5349,8 +6665,9 @@ async function initApp() {
             // ВАЖНО: обновляем кнопки управления после начала демонстрации
             updateControlButtons();
             
-            // Перемещаем камеры в header и делаем экран демонстрации большим
-            moveCamerasToHeaderForScreenShare();
+            // Обновляем layout для режима screen sharing (новая адаптивная система)
+            // Layout создаст отдельный контейнер для screen share
+            updateVideoLayout();
             
             console.log('[ScreenShare] Screen sharing started successfully');
             
@@ -5427,10 +6744,32 @@ async function initApp() {
             // Проверяем, нужно ли вообще запрашивать медиа (хотя бы одно должно быть true)
             if (state.isVideoEnabled || state.isAudioEnabled) {
                 try {
-                    const cameraStream = await navigator.mediaDevices.getUserMedia({
+                    // Используем сохраненный cameraStream если он есть, иначе запрашиваем новый
+                    let cameraStream = state.cameraStream;
+                    
+                    if (!cameraStream || cameraStream.getVideoTracks().length === 0) {
+                        // Если cameraStream не сохранен или не содержит видео, запрашиваем новый
+                        cameraStream = await navigator.mediaDevices.getUserMedia({
                         video: state.isVideoEnabled,
                         audio: state.isAudioEnabled
                     });
+                        state.cameraStream = cameraStream;
+                        console.log('[ScreenShare] Obtained new camera stream after screen share');
+                    } else {
+                        // Восстанавливаем треки из сохраненного cameraStream
+                        console.log('[ScreenShare] Restoring camera from saved cameraStream');
+                        // Проверяем, что треки еще активны
+                        const videoTrack = cameraStream.getVideoTracks()[0];
+                        if (videoTrack && videoTrack.readyState === 'ended') {
+                            // Трек завершен, запрашиваем новый
+                            cameraStream = await navigator.mediaDevices.getUserMedia({
+                                video: state.isVideoEnabled,
+                                audio: state.isAudioEnabled
+                            });
+                            state.cameraStream = cameraStream;
+                            console.log('[ScreenShare] Camera track ended, obtained new stream');
+                        }
+                    }
                     
                     // Заменяем видео трек во всех peer connections (если есть видео)
                     if (state.isVideoEnabled) {
@@ -5498,7 +6837,11 @@ async function initApp() {
                         state.localStream = cameraStream;
                     }
                     
-                    updateVideoDisplay(state.uid, state.localStream);
+                    // Обновляем cameraStream
+                    state.cameraStream = cameraStream;
+                    
+                    // Обновляем отображение камеры пользователя
+                    updateVideoDisplay(state.uid, cameraStream);
                     console.log('[ScreenShare] Camera and microphone restored after screen share');
                     
                 } catch (cameraError) {
@@ -5567,8 +6910,38 @@ async function initApp() {
             state.currentSharingUser = null;
             updateScreenShareButton();
             
-            // Возвращаем камеры обратно в video-section
-            returnCamerasFromHeader();
+            // Принудительно очищаем screen share layout перед обновлением
+            const videoStreams = domCache.getVideoStreams();
+            if (videoStreams) {
+                cleanupScreenShareLayout(videoStreams);
+                
+                // Дополнительная проверка и принудительное удаление
+                const remainingScreenShare = videoStreams.querySelector('.screen-share-container');
+                if (remainingScreenShare) {
+                    console.warn('[ScreenShare] Force removing remaining screen share container');
+                    remainingScreenShare.remove();
+                }
+                
+                const remainingScreenShareVideos = videoStreams.querySelectorAll('.screen-share-video');
+                remainingScreenShareVideos.forEach(videoContainer => {
+                    const video = videoContainer.querySelector('video');
+                    if (video && video.srcObject) {
+                        const stream = video.srcObject;
+                        stream.getTracks().forEach(track => track.stop());
+                        video.srcObject = null;
+                    }
+                    videoContainer.remove();
+                });
+            }
+            
+            // Обновляем отображение камеры пользователя (восстанавливаем в формат 1:1)
+            if (state.localStream) {
+                updateVideoDisplay(state.uid, state.localStream);
+            }
+            
+            // Обновляем layout для обычного режима (новая адаптивная система)
+            // Это удалит screen share контейнер и вернет все видео в обычную сетку
+            updateVideoLayout();
             
             console.log('[ScreenShare] Screen sharing stopped successfully');
             
